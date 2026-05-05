@@ -1,0 +1,779 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Reflect-Tech（実習振り返り評価アプリ）</title>
+  
+  <!-- Tailwind CSS (CDN) -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  
+  <!-- Babel (ブラウザ内でのJSXトランスパイル用) -->
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+  <style>
+    /* 読み込み時のチラつき防止と、ベースのフォント設定 */
+    body { font-family: 'Helvetica Neue', Arial, 'Hiragino Kaku Gothic ProN', 'Hiragino Sans', Meiryo, sans-serif; }
+  </style>
+</head>
+<body class="bg-slate-50">
+  <div id="root"></div>
+
+  <!-- type="text/babel" と data-type="module" を指定することで、ブラウザ上でESモジュールとしてReactなどをimportできます -->
+  <script type="text/babel" data-type="module">
+    import React, { useState, useEffect } from 'https://esm.sh/react@18.2.0';
+    import { createRoot } from 'https://esm.sh/react-dom@18.2.0/client';
+    import { 
+      ClipboardPaste, Play, Download, CheckCircle2, AlertCircle, 
+      RefreshCw, FileSpreadsheet, Settings, Users, BookOpen, 
+      List, Plus, Trash2, Edit3, Save, X, Upload, TableProperties
+    } from 'https://esm.sh/lucide-react@0.330.0';
+
+    // ==========================================
+    // ユーティリティ・初期データ
+    // ==========================================
+    const getLocalDateString = () => {
+      const d = new Date();
+      return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    };
+
+    const DEFAULT_DATA = {
+      settings: { grades: { 1: 1, 2: 0, 3: 0 } },
+      classes: [
+        { 
+          classId: "1-1", 
+          className: "1年1組",
+          students: [
+            { id: "s1", number: 1, name: "山田 太郎", status: "在籍" },
+            { id: "s2", number: 2, name: "佐藤 花子", status: "在籍" },
+            { id: "s3", number: 3, name: "鈴木 一郎", status: "在籍" },
+            { id: "s4", number: 4, name: "高橋 美咲", status: "在籍" },
+            { id: "s5", number: 5, name: "伊藤 健太", status: "在籍" },
+          ] 
+        }
+      ],
+      lessons: [],
+      reflections: {} // key: `${lessonId}_${studentId}`, value: { text, aiGrade, aiReason, finalGrade }
+    };
+
+    // API呼び出し用のリトライ関数
+    const fetchWithRetry = async (url, options, maxRetries = 5) => {
+      const delays = [1000, 2000, 4000, 8000, 16000];
+      for (let i = 0; i <= maxRetries; i++) {
+        try {
+          const response = await fetch(url, options);
+          if (!response.ok) throw new Error(`API Error: ${response.status}`);
+          return await response.json();
+        } catch (error) {
+          if (i === maxRetries) throw error;
+          await new Promise(resolve => setTimeout(resolve, delays[i]));
+        }
+      }
+    };
+
+    // ==========================================
+    // メインコンポーネント
+    // ==========================================
+    function App() {
+      const [activeTab, setActiveTab] = useState('reflections'); // 'reflections', 'cumulative', 'settings'
+      const [appData, setAppData] = useState(() => {
+        try {
+          const saved = localStorage.getItem('reflect_tech_data');
+          return saved ? JSON.parse(saved) : DEFAULT_DATA;
+        } catch {
+          return DEFAULT_DATA;
+        }
+      });
+      const [toast, setToast] = useState({ show: false, message: '', type: 'info' });
+
+      useEffect(() => {
+        localStorage.setItem('reflect_tech_data', JSON.stringify(appData));
+      }, [appData]);
+
+      const showToast = (message, type = 'info') => {
+        setToast({ show: true, message, type });
+        setTimeout(() => setToast({ show: false, message: '', type: 'info' }), 3000);
+      };
+
+      return (
+        <div className="min-h-screen bg-slate-50 font-sans text-slate-800">
+          {/* ヘッダーナビゲーション */}
+          <header className="bg-blue-800 text-white shadow-md sticky top-0 z-40">
+            <div className="container mx-auto px-4 py-3 flex flex-wrap justify-between items-center">
+              <h1 className="text-xl font-bold flex items-center gap-2">
+                <CheckCircle2 className="w-6 h-6 text-blue-300" />
+                Reflect-Tech
+              </h1>
+              <div className="flex gap-1 mt-2 sm:mt-0">
+                <NavButton 
+                  active={activeTab === 'reflections'} onClick={() => setActiveTab('reflections')} 
+                  icon={<BookOpen className="w-4 h-4" />} label="授業別評価" 
+                />
+                <NavButton 
+                  active={activeTab === 'cumulative'} onClick={() => setActiveTab('cumulative')} 
+                  icon={<List className="w-4 h-4" />} label="累積評価" 
+                />
+                <NavButton 
+                  active={activeTab === 'settings'} onClick={() => setActiveTab('settings')} 
+                  icon={<Settings className="w-4 h-4" />} label="名簿設定" 
+                />
+              </div>
+            </div>
+          </header>
+
+          {/* トースト通知 */}
+          {toast.show && (
+            <div className={`fixed top-16 right-4 z-50 px-4 py-3 rounded shadow-lg flex items-center gap-2 text-white font-bold transition-all animate-in slide-in-from-top-2 ${
+              toast.type === 'error' ? 'bg-red-500' : toast.type === 'success' ? 'bg-green-500' : 'bg-blue-600'
+            }`}>
+              {toast.type === 'error' ? <AlertCircle className="w-5 h-5" /> : <CheckCircle2 className="w-5 h-5" />}
+              {toast.message}
+            </div>
+          )}
+
+          {/* メインコンテンツ */}
+          <main className="container mx-auto px-2 py-4 sm:px-4 max-w-7xl">
+            {activeTab === 'reflections' && <ReflectionsScreen appData={appData} setAppData={setAppData} showToast={showToast} />}
+            {activeTab === 'cumulative' && <CumulativeScreen appData={appData} />}
+            {activeTab === 'settings' && <SettingsScreen appData={appData} setAppData={setAppData} showToast={showToast} />}
+          </main>
+        </div>
+      );
+    }
+
+    function NavButton({ active, onClick, icon, label }) {
+      return (
+        <button
+          onClick={onClick}
+          className={`flex items-center gap-2 px-3 py-2 rounded text-sm font-bold transition-colors ${
+            active ? 'bg-white text-blue-800 shadow' : 'text-blue-100 hover:bg-blue-700'
+          }`}
+        >
+          {icon}
+          <span className="hidden sm:inline">{label}</span>
+        </button>
+      );
+    }
+
+    // ==========================================
+    // 1. 授業別評価画面（AI判定機能）
+    // ==========================================
+    function ReflectionsScreen({ appData, setAppData, showToast }) {
+      const [currentClassId, setCurrentClassId] = useState(appData.classes[0]?.classId || "");
+      const [currentLessonId, setCurrentLessonId] = useState("");
+      const [inputText, setInputText] = useState("");
+      const [status, setStatus] = useState("idle");
+
+      const currentClass = appData.classes.find(c => c.classId === currentClassId);
+      const classLessons = appData.lessons.filter(l => l.classId === currentClassId).sort((a, b) => a.count - b.count);
+      const activeLesson = classLessons.find(l => l.id === currentLessonId);
+
+      // クラス変更時に最初の授業を選択
+      useEffect(() => {
+        if (currentClassId) {
+          const lessons = appData.lessons.filter(l => l.classId === currentClassId);
+          if (lessons.length > 0) setCurrentLessonId(lessons[0].id);
+          else setCurrentLessonId("");
+        }
+      }, [currentClassId, appData.lessons]);
+
+      const addLesson = () => {
+        const nextCount = classLessons.length > 0 ? Math.max(...classLessons.map(l => l.count)) + 1 : 1;
+        const newLesson = {
+          id: `l_${Date.now()}`,
+          classId: currentClassId,
+          count: nextCount,
+          title: `第${nextCount}回実習`,
+          date: getLocalDateString(),
+        };
+        setAppData({ ...appData, lessons: [...appData.lessons, newLesson] });
+        setCurrentLessonId(newLesson.id);
+      };
+
+      const updateLessonTitle = (id, title) => {
+        setAppData(prev => ({
+          ...prev, lessons: prev.lessons.map(l => l.id === id ? { ...l, title } : l)
+        }));
+      };
+
+      const insertSampleData = () => {
+        const sample = `両刃のこぎりには、縦挽きと横挽きの2種類の刃があることと、木目に対する向きで使い分けることを学んだ。将来DIYで本棚を作るときに、この知識を活かして頑丈なものを作りたい。まっすぐ切ろうとしても少し曲がってしまったので、次回は力を入れすぎずに引くようにしたい。
+のこぎりの使い方が分かった。特に他はない。
+横挽きは木目を断ち切るように使うということを学んだ。うまく切れたと思う。
+切り始めは親指を添えて、刃の根元の方から小さく動かして溝をつくることを学んだ。溝がしっかりできるとスムーズに切れた。
+`;
+        setInputText(sample);
+      };
+
+      const applyTextToTable = () => {
+        if (!inputText) return;
+
+        const lines = inputText.split('\n');
+        const newReflections = { ...appData.reflections };
+        let appliedCount = 0;
+
+        currentClass.students.forEach((student, index) => {
+          const text = index < lines.length ? lines[index].trim() : "";
+          const key = `${currentLessonId}_${student.id}`;
+          
+          const existing = newReflections[key] || { aiGrade: "-", aiReason: "-", finalGrade: "-" };
+          const isTextChanged = existing.text !== text;
+          
+          newReflections[key] = {
+            ...existing,
+            text: text,
+            ...(isTextChanged && text !== "" && { aiGrade: "-", aiReason: "-", finalGrade: "-" })
+          };
+          
+          if (text) appliedCount++;
+        });
+
+        setAppData({ ...appData, reflections: newReflections });
+        setInputText(""); 
+        showToast(`${appliedCount}名分のテキストを表に反映しました。右の表でズレがないか確認してください。`, "success");
+      };
+
+      const getUnassessedStudents = () => {
+        if (!currentClass || !currentLessonId) return [];
+        return currentClass.students.filter(s => {
+          const data = appData.reflections[`${currentLessonId}_${s.id}`];
+          return data && data.text && data.text.trim() !== "" && data.aiGrade === "-";
+        });
+      };
+
+      const analyzeWithAI = async () => {
+        const targetStudents = getUnassessedStudents().map(s => ({
+          studentId: s.id,
+          text: appData.reflections[`${currentLessonId}_${s.id}`].text
+        }));
+
+        if (targetStudents.length === 0) {
+          showToast("評価する未評価テキストがありません。", "info");
+          return;
+        }
+
+        setStatus('analyzing');
+
+        const apiKey = ""; // APIキーは実行環境から提供されます
+        const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`;
+        const systemPrompt = `あなたは中学校技術科の教員です。生徒の実習振り返りをA, B, Cの3段階で評価してください。
+【評価基準】観点1:内容理解、観点2:実生活とのつながり、観点3:新たな疑問や課題
+【判定条件】A:2つ以上の観点を具体的に満たす。B:要約はできているが考察が乏しい。C:記述が極端に短い。
+出力は入力されたstudentIdを用いたJSON配列のみを返してください。
+[{"studentId": "...", "grade": "A|B|C", "reason": "理由"}]`;
+
+        const payload = {
+          contents: [{ parts: [{ text: JSON.stringify(targetStudents) }] }],
+          systemInstruction: { parts: [{ text: systemPrompt }] },
+          generationConfig: { responseMimeType: "application/json" }
+        };
+
+        try {
+          const result = await fetchWithRetry(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+          });
+
+          const responseText = result.candidates?.[0]?.content?.parts?.[0]?.text;
+          if (!responseText) throw new Error('Empty response');
+
+          const aiResults = JSON.parse(responseText);
+          const newReflections = { ...appData.reflections };
+
+          targetStudents.forEach(ts => {
+            const res = aiResults.find(r => r.studentId === ts.studentId);
+            if (res) {
+              const key = `${currentLessonId}_${ts.studentId}`;
+              newReflections[key] = {
+                ...newReflections[key],
+                aiGrade: res.grade,
+                aiReason: res.reason,
+                finalGrade: res.grade
+              };
+            }
+          });
+
+          setAppData({ ...appData, reflections: newReflections });
+          setStatus('done');
+          showToast("AI評価が完了しました", "success");
+
+        } catch (error) {
+          console.error(error);
+          showToast("AI評価中にエラーが発生しました", "error");
+          setStatus('idle');
+        }
+      };
+
+      const handleGradeChange = (studentId, newGrade) => {
+        const key = `${currentLessonId}_${studentId}`;
+        const current = appData.reflections[key] || { text: "", aiGrade: "-", aiReason: "" };
+        setAppData({
+          ...appData,
+          reflections: {
+            ...appData.reflections,
+            [key]: { ...current, finalGrade: newGrade }
+          }
+        });
+      };
+
+      if (!currentClass) return <div className="text-center p-8 text-slate-500">名簿設定からクラスを作成してください。</div>;
+
+      return (
+        <div className="space-y-4">
+          {/* 操作バー */}
+          <div className="bg-white p-3 rounded-lg shadow-sm border border-slate-200 flex flex-wrap items-center justify-between gap-4">
+            <div className="flex items-center gap-4">
+              <select 
+                value={currentClassId} onChange={(e) => setCurrentClassId(e.target.value)}
+                className="border-slate-300 rounded font-bold text-slate-700 bg-slate-50 py-1.5"
+              >
+                {appData.classes.map(c => <option key={c.classId} value={c.classId}>{c.className}</option>)}
+              </select>
+
+              {classLessons.length > 0 && (
+                <div className="flex items-center gap-2">
+                  <select 
+                    value={currentLessonId} onChange={(e) => setCurrentLessonId(e.target.value)}
+                    className="border-blue-300 rounded font-bold text-blue-800 bg-blue-50 py-1.5"
+                  >
+                    {classLessons.map(l => <option key={l.id} value={l.id}>第{l.count}回: {l.title}</option>)}
+                  </select>
+                </div>
+              )}
+            </div>
+            <button onClick={addLesson} className="flex items-center gap-1 bg-white border border-blue-600 text-blue-600 hover:bg-blue-50 px-3 py-1.5 rounded text-sm font-bold transition-colors">
+              <Plus className="w-4 h-4" /> 新規授業
+            </button>
+          </div>
+
+          {!activeLesson ? (
+            <div className="bg-white p-8 rounded-lg shadow-sm text-center border border-slate-200">
+              <BookOpen className="w-12 h-12 text-slate-300 mx-auto mb-3" />
+              <p className="text-slate-500 font-medium">「新規授業」ボタンから授業を追加してください。</p>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+              
+              {/* 左側：データ入力パネル */}
+              <div className="lg:col-span-1 space-y-4">
+                <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden flex flex-col h-full">
+                  <div className="bg-blue-50 px-4 py-3 border-b border-slate-200 flex justify-between items-center">
+                    <h2 className="font-bold text-blue-900 text-sm">振り返りデータの追加</h2>
+                    <button onClick={insertSampleData} className="text-xs text-blue-600 hover:text-blue-800 flex items-center gap-1 font-medium">
+                      <FileSpreadsheet className="w-3 h-3" /> サンプル
+                    </button>
+                  </div>
+                  <div className="p-4 flex-1 flex flex-col">
+                    <div className="mb-3">
+                      <label className="block text-xs font-bold text-slate-600 mb-1">授業タイトル</label>
+                      <input 
+                        type="text" value={activeLesson.title} onChange={e => updateLessonTitle(activeLesson.id, e.target.value)}
+                        className="w-full text-sm border-slate-300 rounded focus:ring-blue-500"
+                        placeholder="例: 両刃のこぎりの使い方"
+                      />
+                    </div>
+                    <p className="text-xs text-slate-500 mb-2 font-bold text-blue-800">
+                      <ClipboardPaste className="w-3 h-3 inline mr-1" />
+                      スプレッドシートの「コメント列のみ」を選択してペースト
+                    </p>
+                    <textarea
+                      value={inputText} onChange={(e) => setInputText(e.target.value)}
+                      placeholder="出席番号1番から最後までをコピーして貼り付け (Ctrl+V)"
+                      className="w-full flex-1 min-h-[120px] p-3 border border-slate-300 rounded text-xs font-mono bg-slate-50 focus:ring-blue-500"
+                    />
+                    
+                    <div className="flex flex-col gap-2 mt-3">
+                      <button
+                        onClick={applyTextToTable}
+                        disabled={!inputText}
+                        className={`w-full flex justify-center items-center gap-2 py-2 rounded text-sm font-bold transition-all ${!inputText ? 'bg-slate-200 text-slate-400 cursor-not-allowed' : 'bg-slate-800 text-white hover:bg-slate-900 shadow-sm'}`}
+                      >
+                        <TableProperties className="w-4 h-4" /> 1. リストに反映してズレを確認
+                      </button>
+                      <button
+                        onClick={analyzeWithAI}
+                        disabled={status === 'analyzing' || getUnassessedStudents().length === 0}
+                        className={`w-full flex justify-center items-center gap-2 py-2.5 rounded text-sm font-bold text-white transition-all
+                          ${status === 'analyzing' || getUnassessedStudents().length === 0 ? 'bg-blue-300 cursor-not-allowed' : 'bg-blue-600 hover:bg-blue-700 shadow-sm'}`}
+                      >
+                        {status === 'analyzing' ? <><RefreshCw className="w-4 h-4 animate-spin" /> 評価中...</> : <><Play className="w-4 h-4" /> 2. 未評価のテキストをAI解析</>}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* 右側：評価一覧テーブル */}
+              <div className="lg:col-span-2">
+                <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
+                  <div className="bg-slate-50 px-4 py-3 border-b border-slate-200 flex justify-between items-center">
+                    <h2 className="font-bold text-slate-800 text-sm">個別評価リスト（{activeLesson.title}）</h2>
+                    <span className="text-xs font-bold text-blue-600 bg-blue-100 px-2 py-1 rounded-full">
+                      未評価: {getUnassessedStudents().length} 名
+                    </span>
+                  </div>
+                  <div className="overflow-x-auto max-h-[600px] overflow-y-auto">
+                    <table className="w-full text-left text-sm border-collapse relative">
+                      <thead className="bg-slate-100/90 backdrop-blur sticky top-0 z-10 shadow-sm">
+                        <tr>
+                          <th className="py-2 px-3 font-semibold text-slate-600 w-12 text-center border-b">番</th>
+                          <th className="py-2 px-3 font-semibold text-slate-600 w-24 border-b">氏名</th>
+                          <th className="py-2 px-3 font-semibold text-slate-600 border-b">振り返り内容</th>
+                          <th className="py-2 px-3 font-semibold text-slate-600 w-16 text-center border-b">AI</th>
+                          <th className="py-2 px-3 font-semibold text-blue-800 w-20 text-center bg-blue-50 border-b">最終</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-200">
+                        {currentClass.students.map((student) => {
+                          const data = appData.reflections[`${currentLessonId}_${student.id}`] || { text: "", aiGrade: "-", aiReason: "-", finalGrade: "-" };
+                          const hasText = data.text && data.text.trim() !== "";
+                          
+                          return (
+                            <tr key={student.id} className="hover:bg-slate-50">
+                              <td className="py-3 px-3 text-center text-slate-500 font-bold">{student.number}</td>
+                              <td className="py-3 px-3 font-medium text-slate-700">{student.name}</td>
+                              <td className="py-3 px-3 text-slate-700 text-xs leading-relaxed">
+                                {hasText ? (
+                                  <>
+                                    {data.text}
+                                    {data.aiReason && data.aiReason !== "-" && (
+                                      <div className="mt-1 text-[10px] text-slate-500 bg-blue-50 border border-blue-100 p-1.5 rounded flex gap-1">
+                                        <span className="font-bold text-blue-700 shrink-0">AI:</span> {data.aiReason}
+                                      </div>
+                                    )}
+                                  </>
+                                ) : (
+                                  <span className="text-slate-300 italic">（未入力）</span>
+                                )}
+                              </td>
+                              <td className="py-3 px-3 text-center">
+                                {hasText && (
+                                  <span className={`inline-flex items-center justify-center w-6 h-6 rounded-full text-xs font-bold
+                                    ${data.aiGrade === 'A' ? 'bg-green-100 text-green-700' : 
+                                      data.aiGrade === 'B' ? 'bg-blue-100 text-blue-700' : 
+                                      data.aiGrade === 'C' ? 'bg-orange-100 text-orange-700' : 'bg-slate-200 text-slate-500'}`}>
+                                    {data.aiGrade === "-" ? "?" : data.aiGrade}
+                                  </span>
+                                )}
+                              </td>
+                              <td className="py-3 px-3 text-center bg-blue-50/30">
+                                {hasText && (
+                                  <select
+                                    value={data.finalGrade || "-"}
+                                    onChange={(e) => handleGradeChange(student.id, e.target.value)}
+                                    className={`w-full border rounded text-sm font-bold bg-white focus:ring-2 focus:ring-blue-500 py-1 px-1 shadow-sm
+                                      ${data.finalGrade === "-" ? "border-slate-300 text-slate-400" : "border-blue-300 text-blue-800"}`}
+                                  >
+                                    <option value="-">-</option>
+                                    <option value="A">A</option>
+                                    <option value="B">B</option>
+                                    <option value="C">C</option>
+                                  </select>
+                                )}
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              </div>
+
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    // ==========================================
+    // 2. 累積評価画面
+    // ==========================================
+    function CumulativeScreen({ appData }) {
+      const [currentClassId, setCurrentClassId] = useState(appData.classes[0]?.classId || "");
+      const currentClass = appData.classes.find(c => c.classId === currentClassId);
+      const classLessons = appData.lessons.filter(l => l.classId === currentClassId).sort((a, b) => a.count - b.count);
+
+      const exportCSV = () => {
+        if (!currentClass) return;
+        const headers = ['番号', '氏名', ...classLessons.map(l => `第${l.count}回`), 'A数', 'B数', 'C数'];
+        const rows = currentClass.students.map(s => {
+          let a = 0, b = 0, c = 0;
+          const grades = classLessons.map(l => {
+            const grade = appData.reflections[`${l.id}_${s.id}`]?.finalGrade || '-';
+            if(grade === 'A') a++; if(grade === 'B') b++; if(grade === 'C') c++;
+            return grade;
+          });
+          return [s.number, s.name, ...grades, a, b, c];
+        });
+
+        const csvContent = [headers.join(','), ...rows.map(e => e.join(','))].join('\n');
+        const bom = new Uint8Array([0xEF, 0xBB, 0xBF]);
+        const blob = new Blob([bom, csvContent], { type: 'text/csv;charset=utf-8;' });
+        const link = document.createElement('a');
+        link.href = URL.createObjectURL(blob);
+        link.download = `${currentClass.className}_累積評価.csv`;
+        link.click();
+      };
+
+      if (!currentClass) return <div className="text-center p-8">クラスを設定してください。</div>;
+
+      return (
+        <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
+          <div className="bg-slate-50 px-4 py-3 border-b border-slate-200 flex flex-wrap justify-between items-center gap-4">
+            <div className="flex items-center gap-3">
+              <List className="w-5 h-5 text-slate-500" />
+              <select 
+                value={currentClassId} onChange={(e) => setCurrentClassId(e.target.value)}
+                className="border-slate-300 rounded font-bold text-slate-700 py-1.5"
+              >
+                {appData.classes.map(c => <option key={c.classId} value={c.classId}>{c.className}</option>)}
+              </select>
+              <span className="text-sm text-slate-500">累積評価シート</span>
+            </div>
+            <button onClick={exportCSV} className="flex items-center gap-1.5 bg-slate-800 hover:bg-slate-900 text-white px-3 py-1.5 rounded text-sm font-medium transition-colors">
+              <Download className="w-4 h-4" /> CSV出力
+            </button>
+          </div>
+
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-sm border-collapse">
+              <thead className="bg-slate-100">
+                <tr>
+                  <th className="py-3 px-3 font-semibold text-slate-600 w-12 text-center border-b border-r sticky left-0 bg-slate-100 z-10">番</th>
+                  <th className="py-3 px-3 font-semibold text-slate-600 w-32 border-b border-r sticky left-12 bg-slate-100 z-10">氏名</th>
+                  {classLessons.map(l => (
+                    <th key={l.id} className="py-3 px-2 font-semibold text-slate-600 text-center border-b min-w-[60px]" title={l.title}>
+                      第{l.count}回
+                    </th>
+                  ))}
+                  <th className="py-3 px-2 font-bold text-green-700 text-center border-b border-l bg-green-50 w-12">A</th>
+                  <th className="py-3 px-2 font-bold text-blue-700 text-center border-b bg-blue-50 w-12">B</th>
+                  <th className="py-3 px-2 font-bold text-orange-700 text-center border-b bg-orange-50 w-12">C</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-200">
+                {currentClass.students.map((student) => {
+                  let counts = { A: 0, B: 0, C: 0 };
+                  return (
+                    <tr key={student.id} className="hover:bg-slate-50">
+                      <td className="py-2 px-3 text-center text-slate-500 border-r sticky left-0 bg-white group-hover:bg-slate-50">{student.number}</td>
+                      <td className="py-2 px-3 font-medium border-r sticky left-12 bg-white group-hover:bg-slate-50">{student.name}</td>
+                      
+                      {classLessons.map(l => {
+                        const grade = appData.reflections[`${l.id}_${student.id}`]?.finalGrade;
+                        if (grade) counts[grade]++;
+                        return (
+                          <td key={l.id} className="py-2 px-2 text-center font-bold">
+                            <span className={`
+                              ${grade === 'A' ? 'text-green-600' : grade === 'B' ? 'text-blue-600' : grade === 'C' ? 'text-orange-600' : 'text-slate-300'}
+                            `}>
+                              {grade || '-'}
+                            </span>
+                          </td>
+                        );
+                      })}
+                      
+                      <td className="py-2 px-2 text-center font-bold text-green-700 bg-green-50/30 border-l">{counts.A || ''}</td>
+                      <td className="py-2 px-2 text-center font-bold text-blue-700 bg-blue-50/30">{counts.B || ''}</td>
+                      <td className="py-2 px-2 text-center font-bold text-orange-700 bg-orange-50/30">{counts.C || ''}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+            {classLessons.length === 0 && (
+              <div className="p-8 text-center text-slate-400">授業データがありません。</div>
+            )}
+          </div>
+        </div>
+      );
+    }
+
+    // ==========================================
+    // 3. 設定画面（クラス・名簿設定）
+    // ==========================================
+    function SettingsScreen({ appData, setAppData, showToast }) {
+      const [activeClassId, setActiveClassId] = useState(appData.classes[0]?.classId || null);
+      const [bulkImport, setBulkImport] = useState({ show: false, text: '' });
+      
+      const activeClass = appData.classes.find(c => c.classId === activeClassId);
+
+      const addStudent = () => {
+        if (!activeClass) return;
+        const nextNum = activeClass.students.length > 0 ? Math.max(...activeClass.students.map(s => s.number)) + 1 : 1;
+        const newStudent = { id: `s_${Date.now()}`, number: nextNum, name: "", status: "在籍" };
+        
+        setAppData(prev => ({
+          ...prev, classes: prev.classes.map(c => c.classId === activeClass.classId ? { ...c, students: [...c.students, newStudent] } : c)
+        }));
+      };
+
+      const updateStudent = (studentId, field, value) => {
+        setAppData(prev => ({
+          ...prev, classes: prev.classes.map(c => c.classId === activeClass.classId ? {
+            ...c, students: c.students.map(s => s.id === studentId ? { ...s, [field]: value } : s)
+          } : c)
+        }));
+      };
+
+      const deleteStudent = (studentId) => {
+        if(!window.confirm("この生徒を削除しますか？")) return;
+        setAppData(prev => ({
+          ...prev, classes: prev.classes.map(c => c.classId === activeClass.classId ? {
+            ...c, students: c.students.filter(s => s.id !== studentId)
+          } : c)
+        }));
+      };
+
+      const processBulkImport = () => {
+        if (!bulkImport.text.trim() || !activeClass) return;
+        const lines = bulkImport.text.split('\n').filter(l => l.trim() !== '');
+        const newStudents = [];
+        let currentMaxNumber = activeClass.students.length > 0 ? Math.max(...activeClass.students.map(s => s.number)) : 0;
+
+        lines.forEach((line, i) => {
+          const cols = line.split(/[\t,]/).map(c => c.trim().replace(/^"|"$/g, ''));
+          if (cols.length === 0) return;
+
+          let number = currentMaxNumber + 1;
+          let name = cols[0];
+
+          if (!isNaN(parseInt(cols[0]))) {
+            number = parseInt(cols[0]);
+            name = cols[1] || "";
+          }
+          currentMaxNumber = number;
+
+          newStudents.push({ id: `s_bulk_${Date.now()}_${i}`, number, name, status: "在籍" });
+        });
+
+        setAppData(prev => ({
+          ...prev, classes: prev.classes.map(c => c.classId === activeClass.classId ? {
+            ...c, students: [...c.students, ...newStudents]
+          } : c)
+        }));
+        setBulkImport({ show: false, text: '' });
+        showToast(`${newStudents.length}名の生徒を追加しました`, "success");
+      };
+
+      return (
+        <div className="max-w-4xl mx-auto space-y-6">
+          <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6">
+            <h2 className="text-lg font-bold flex items-center gap-2 mb-4 text-slate-800">
+              <Users className="w-5 h-5 text-blue-600" />
+              名簿の管理
+            </h2>
+
+            <div className="flex flex-wrap gap-2 mb-6 border-b border-slate-100 pb-4">
+              {appData.classes.map(c => (
+                <button
+                  key={c.classId} onClick={() => setActiveClassId(c.classId)}
+                  className={`px-4 py-2 rounded-lg font-bold text-sm transition-colors border ${
+                    activeClassId === c.classId ? 'bg-blue-600 text-white border-blue-600 shadow-sm' : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'
+                  }`}
+                >
+                  {c.className}
+                </button>
+              ))}
+              <button 
+                onClick={() => {
+                  const newId = `c_${Date.now()}`;
+                  setAppData(prev => ({ ...prev, classes: [...prev.classes, { classId: newId, className: "新規クラス", students: [] }] }));
+                  setActiveClassId(newId);
+                }}
+                className="px-3 py-2 rounded-lg text-slate-400 border border-dashed border-slate-300 hover:text-slate-600 hover:bg-slate-50"
+              >
+                <Plus className="w-4 h-4" />
+              </button>
+            </div>
+
+            {activeClass && (
+              <div>
+                <div className="flex justify-between items-center mb-3">
+                  <input 
+                    type="text" value={activeClass.className}
+                    onChange={e => setAppData(prev => ({ ...prev, classes: prev.classes.map(c => c.classId === activeClass.classId ? { ...c, className: e.target.value } : c)}))}
+                    className="font-bold text-lg border-b-2 border-transparent hover:border-slate-300 focus:border-blue-500 focus:outline-none px-1 bg-transparent"
+                  />
+                  <div className="flex gap-2">
+                    <button onClick={() => setBulkImport({ show: true, text: '' })} className="flex items-center gap-1.5 bg-indigo-50 text-indigo-700 hover:bg-indigo-100 px-3 py-1.5 rounded text-sm font-bold transition-colors">
+                      <Upload className="w-4 h-4" /> スプレッドシートから追加
+                    </button>
+                    <button onClick={addStudent} className="flex items-center gap-1.5 bg-blue-600 hover:bg-blue-700 text-white px-3 py-1.5 rounded text-sm font-bold transition-colors shadow-sm">
+                      <Plus className="w-4 h-4" /> 1名追加
+                    </button>
+                  </div>
+                </div>
+
+                <table className="w-full text-left text-sm border-collapse">
+                  <thead className="bg-slate-50 border-y border-slate-200">
+                    <tr>
+                      <th className="py-2 px-3 font-semibold text-slate-600 w-20 text-center">番号</th>
+                      <th className="py-2 px-3 font-semibold text-slate-600">氏名</th>
+                      <th className="py-2 px-3 font-semibold text-slate-600 w-16 text-center">操作</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {activeClass.students.map(s => (
+                      <tr key={s.id} className="hover:bg-slate-50/50 transition-colors">
+                        <td className="py-1 px-3 text-center">
+                          <input type="number" value={s.number} onChange={e => updateStudent(s.id, 'number', Number(e.target.value))} className="w-16 p-1.5 text-center border border-slate-200 rounded focus:ring-blue-500" />
+                        </td>
+                        <td className="py-1 px-3">
+                          <input type="text" value={s.name} onChange={e => updateStudent(s.id, 'name', e.target.value)} className="w-full max-w-xs p-1.5 border border-slate-200 rounded focus:ring-blue-500" placeholder="氏名" />
+                        </td>
+                        <td className="py-1 px-3 text-center">
+                          <button onClick={() => deleteStudent(s.id)} className="p-1.5 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded transition-colors">
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                    {activeClass.students.length === 0 && (
+                      <tr><td colSpan={3} className="py-8 text-center text-slate-400">生徒が登録されていません。</td></tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            )}
+
+            {/* バルクインポートモーダル */}
+            {bulkImport.show && (
+              <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+                <div className="bg-white rounded-xl shadow-xl w-full max-w-lg overflow-hidden animate-in zoom-in-95 duration-200">
+                  <div className="px-5 py-4 border-b border-slate-200 flex justify-between items-center bg-slate-50">
+                    <h3 className="font-bold flex items-center gap-2 text-slate-800"><Upload className="w-5 h-5 text-indigo-600"/> 名簿の一括追加</h3>
+                    <button onClick={() => setBulkImport({ show: false, text: '' })} className="text-slate-400 hover:text-slate-600"><X className="w-5 h-5"/></button>
+                  </div>
+                  <div className="p-5">
+                    <p className="text-xs text-slate-500 mb-2">エクセルやスプレッドシートから「番号」「氏名」の列をコピーして貼り付けてください。</p>
+                    <textarea
+                      autoFocus
+                      value={bulkImport.text} onChange={e => setBulkImport({ ...bulkImport, text: e.target.value })}
+                      placeholder="1 	山田太郎&#10;2 	佐藤花子"
+                      className="w-full h-48 border border-slate-300 rounded-lg p-3 text-sm focus:ring-2 focus:ring-indigo-500"
+                    />
+                  </div>
+                  <div className="px-5 py-4 border-t border-slate-200 flex justify-end gap-2 bg-slate-50">
+                    <button onClick={() => setBulkImport({ show: false, text: '' })} className="px-4 py-2 text-sm font-bold text-slate-600 hover:bg-slate-200 rounded-lg">キャンセル</button>
+                    <button onClick={processBulkImport} className="px-4 py-2 text-sm font-bold text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg shadow-sm">追加する</button>
+                  </div>
+                </div>
+              </div>
+            )}
+
+          </div>
+        </div>
+      );
+    }
+
+    // 最後にAppコンポーネントをマウントします
+    const rootElement = document.getElementById('root');
+    const root = createRoot(rootElement);
+    root.render(<App />);
+
+  </script>
+</body>
+</html>
