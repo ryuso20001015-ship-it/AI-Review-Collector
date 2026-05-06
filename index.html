@@ -33,8 +33,28 @@
       ClipboardPaste, Play, Download, CheckCircle2, AlertCircle, 
       RefreshCw, FileSpreadsheet, Settings, Users, BookOpen, 
       List, Plus, Trash2, Edit3, Save, X, Upload, TableProperties, Cloud, CloudOff,
-      UserCheck, UserMinus, Clock, UserX, RotateCcw
+      UserCheck, UserMinus, Clock, UserX, RotateCcw, Lock
     } from 'https://esm.sh/lucide-react@0.330.0';
+
+    // ==========================================
+    // 先生専用設定（ここに直書きしてください）
+    // ==========================================
+    const PRIVATE_SETTINGS = {
+      // 1. Gemini APIキーをダブルクォーテーションの間に貼り付けます
+      geminiApiKey: "AIzaSyB_l1gm3HJGzI2J1Wx8xUNnEtNA6QGukBs", 
+      
+      // 2. Firebaseコンソールの構成（JSON）を1行の正しい形式で最適化しました
+      firebaseConfig: '{"apiKey":"AIzaSyDapSZecN-WBkhXbPv1vMKSFNp-Pe1bJVY","authDomain":"reflect-tech-99d40.firebaseapp.com","projectId":"reflect-tech-99d40","storageBucket":"reflect-tech-99d40.firebasestorage.app","messagingSenderId":"603184148867","appId":"1:603184148867:web:b49f38d11dc8d74c9786b6","measurementId":"G-T23YQ0NJ28"}', 
+      
+      // 3. このアプリの同期用合言葉（お好きな英数字）
+      appId: "my-reflect-tech-private-01", 
+      
+      // 4. 最初からクラウド同期をオンにする場合は true にします（最適化：最初から有効にしました）
+      syncEnabled: true, 
+      
+      // 5. 授業出席記録アプリの「同期用合言葉」を入力すると自動連携します
+      attendanceAppId: "" 
+    };
 
     // ==========================================
     // ユーティリティ
@@ -52,20 +72,14 @@
     };
 
     const DEFAULT_DATA = {
-      settings: { 
-        geminiApiKey: "", 
-        firebaseConfig: "", 
-        appId: `rt-${Math.random().toString(36).substring(2, 7)}`, 
-        syncEnabled: false,
-        attendanceAppId: "" // 追加：外部出欠アプリの連携ID
-      },
+      settings: PRIVATE_SETTINGS,
       classes: [
         { 
           classId: "1-1", className: "1年1組",
           students: [
-            { id: "s1", number: 1, name: "山田 太郎", status: "出席" },
-            { id: "s2", number: 2, name: "佐藤 花子", status: "出席" },
-            { id: "s3", number: 3, name: "鈴木 一郎", status: "出席" },
+            { id: "s1", number: 1, name: "山田 太郎", kana: "やまだ たろう", gender: "男", status: "出席" },
+            { id: "s2", number: 2, name: "佐藤 花子", kana: "さとう はなこ", gender: "女", status: "出席" },
+            { id: "s3", number: 3, name: "鈴木 一郎", kana: "すずき いちろう", gender: "男", status: "出席" },
           ] 
         }
       ],
@@ -80,7 +94,24 @@
       const [activeTab, setActiveTab] = useState('reflections');
       const [appData, setAppData] = useState(() => {
         const saved = localStorage.getItem('reflect_tech_data');
-        return saved ? JSON.parse(saved) : DEFAULT_DATA;
+        if (saved) {
+          try {
+            const parsed = JSON.parse(saved);
+            // ソースコードの PRIVATE_SETTINGS が書き込まれていれば、そちらを強制的に優先する
+            parsed.settings = {
+              ...parsed.settings,
+              geminiApiKey: PRIVATE_SETTINGS.geminiApiKey || parsed.settings.geminiApiKey,
+              firebaseConfig: PRIVATE_SETTINGS.firebaseConfig || parsed.settings.firebaseConfig,
+              appId: PRIVATE_SETTINGS.appId || parsed.settings.appId,
+              syncEnabled: PRIVATE_SETTINGS.firebaseConfig ? PRIVATE_SETTINGS.syncEnabled : parsed.settings.syncEnabled,
+              attendanceAppId: PRIVATE_SETTINGS.attendanceAppId || parsed.settings.attendanceAppId,
+            };
+            return parsed;
+          } catch (e) {
+            return DEFAULT_DATA;
+          }
+        }
+        return DEFAULT_DATA;
       });
       const [user, setUser] = useState(null);
       const [isSyncing, setIsSyncing] = useState(false);
@@ -129,7 +160,6 @@
                       return { ...c, students: newStudents };
                     });
                     
-                    // 出欠に変化があった場合のみアプリのデータを更新
                     if(JSON.stringify(prev.classes) !== JSON.stringify(newClasses)) {
                       return { ...prev, classes: newClasses };
                     }
@@ -239,10 +269,8 @@
           const isAbsent = (student.status === "欠席" || student.status === "公欠");
 
           if (isAbsent) {
-            // 欠席者は空文字で更新
             newReflections[key] = { ...(newReflections[key] || {}), text: "", aiGrade: "-", aiReason: "-", finalGrade: "-" };
           } else {
-            // 出席者のみ、ペーストされた行を順番に割り当てる
             const text = lineIdx < lines.length ? lines[lineIdx].trim() : "";
             newReflections[key] = { ...(newReflections[key] || {}), text: text };
             if (text) appliedCount++;
@@ -317,7 +345,6 @@
                 <div className="bg-white rounded-xl shadow-sm border overflow-hidden flex flex-col h-full">
                   <div className="bg-blue-50 px-4 py-3 border-b flex justify-between items-center">
                     <h2 className="font-bold text-blue-900 text-sm">振り返りの一括反映</h2>
-                    {/* 出欠アプリと連携している場合、バッジを表示 */}
                     {appData.settings.attendanceAppId && (
                       <span className="text-[10px] font-bold text-indigo-600 bg-indigo-100 px-2 py-1 rounded-full flex items-center gap-1">
                         <UserCheck className="w-3 h-3" /> 出欠自動同期中
@@ -441,8 +468,6 @@
     }
 
     // ==========================================
-    // 3. 設定画面（出欠記録グリッド機能を追加）
-    // ==========================================
     // 3. 設定画面（外部連携と名簿管理）
     // ==========================================
     function SettingsScreen({ appData, setAppData, showToast }) {
@@ -457,7 +482,7 @@
       const addStudent = () => {
         if (!activeClass) return;
         const nextNum = activeClass.students.length > 0 ? Math.max(...activeClass.students.map(s => s.number)) + 1 : 1;
-        const newStudent = { id: `s_${Date.now()}`, number: nextNum, name: "", status: "出席" };
+        const newStudent = { id: `s_${Date.now()}`, number: nextNum, name: "", kana: "", gender: "未設定", status: "出席" };
         setAppData({
           ...appData, classes: appData.classes.map(c => c.classId === activeClassId ? { ...c, students: [...c.students, newStudent] } : c)
         });
@@ -491,12 +516,21 @@
           if (cols.length === 0) return;
           let number = currentMaxNumber + 1;
           let name = cols[0];
+          let kana = "";
+          let gender = "未設定";
+
           if (!isNaN(parseInt(cols[0]))) {
             number = parseInt(cols[0]);
             name = cols[1] || "";
+            kana = cols[2] || "";
+            gender = cols[3] || "未設定";
+          } else {
+            name = cols[0] || "";
+            kana = cols[1] || "";
+            gender = cols[2] || "未設定";
           }
           currentMaxNumber = number;
-          newStudents.push({ id: `s_bulk_${Date.now()}_${i}`, number, name, status: "出席" });
+          newStudents.push({ id: `s_bulk_${Date.now()}_${i}`, number, name, kana, gender, status: "出席" });
         });
 
         setAppData({
@@ -513,11 +547,17 @@
           {/* システム設定 */}
           <div className="bg-white rounded-xl shadow-sm border p-6">
             <h2 className="text-lg font-bold flex items-center gap-2 mb-6 text-slate-800"><Settings className="w-5 h-5 text-blue-600" /> システム・同期設定</h2>
+            
+            <div className="mb-6 p-3 bg-slate-100 rounded-lg border border-slate-200 text-sm text-slate-600 flex items-start gap-2">
+              <Lock className="w-4 h-4 mt-0.5 text-slate-400 shrink-0" />
+              <p>設定情報はファイル上部の <code>PRIVATE_SETTINGS</code> に直書きされています。変更する場合はソースコードを直接編集してください。（※ここで入力しても、リロードすると直書きした値に戻ります）</p>
+            </div>
+
             <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
               <div className="space-y-4">
                 <div>
                   <label className="block text-xs font-bold text-slate-500 mb-1 uppercase">Gemini API Key</label>
-                  <input type="password" value={appData.settings.geminiApiKey} onChange={e => updateSettings('geminiApiKey', e.target.value)} placeholder="AI評価用のAPIキー" className="w-full p-2.5 text-sm border rounded bg-slate-50 focus:ring-2 focus:ring-blue-500" />
+                  <input type="password" value={appData.settings.geminiApiKey} onChange={e => updateSettings('geminiApiKey', e.target.value)} placeholder="ソースコードに直書きしてください" className="w-full p-2.5 text-sm border rounded bg-slate-50 text-slate-500" />
                 </div>
                 <div className="p-4 bg-indigo-50 rounded-xl border border-indigo-100">
                   <div className="flex items-center justify-between mb-3">
@@ -536,10 +576,9 @@
                       type="text" 
                       value={appData.settings.appId} 
                       onChange={e => updateSettings('appId', e.target.value)} 
-                      placeholder="例：tech-reflect-01" 
-                      className="w-full p-2 text-sm border border-indigo-200 rounded focus:ring-2 focus:ring-indigo-500" 
+                      placeholder="ソースコードに直書きしてください" 
+                      className="w-full p-2 text-sm border border-indigo-200 rounded text-slate-500" 
                     />
-                    <p className="text-[10px] text-indigo-600 mt-1">※同期させたい端末（iPadとPCなど）で同じ合言葉を入力してください。</p>
                   </div>
                 </div>
               </div>
@@ -547,7 +586,7 @@
               <div className="space-y-4">
                 <div>
                   <label className="block text-xs font-bold text-slate-500 mb-1 uppercase">Firebase Config (JSON)</label>
-                  <textarea value={appData.settings.firebaseConfig} onChange={e => updateSettings('firebaseConfig', e.target.value)} placeholder="Firebase構成JSONを貼り付け" className="w-full h-24 p-3 text-[10px] font-mono border rounded bg-slate-50 focus:ring-2 focus:ring-blue-500" />
+                  <textarea value={appData.settings.firebaseConfig} onChange={e => updateSettings('firebaseConfig', e.target.value)} placeholder="ソースコードに直書きしてください" className="w-full h-24 p-3 text-[10px] font-mono border rounded bg-slate-50 text-slate-500" />
                 </div>
                 <div className="pt-2 border-t border-slate-100">
                   <label className="block text-xs font-bold text-indigo-500 mb-1 uppercase flex items-center gap-1"><UserCheck className="w-4 h-4"/> 外部アプリ連携 (授業出欠記録アプリ)</label>
@@ -555,12 +594,9 @@
                     type="text" 
                     value={appData.settings.attendanceAppId || ""} 
                     onChange={e => updateSettings('attendanceAppId', e.target.value)} 
-                    placeholder="出欠記録アプリの「同期用合言葉」を入力" 
-                    className="w-full p-2.5 text-sm border border-indigo-200 rounded bg-white focus:ring-2 focus:ring-indigo-500" 
+                    placeholder="ソースコードに直書きしてください" 
+                    className="w-full p-2.5 text-sm border border-indigo-200 rounded bg-white text-slate-500" 
                   />
-                  <p className="text-[10px] text-slate-500 mt-1 leading-tight">
-                    ※「授業出欠記録アプリ」で設定している合言葉を入力すると、出欠データが自動で「授業別評価」に反映されます。
-                  </p>
                 </div>
               </div>
             </div>
@@ -616,6 +652,8 @@
                     <tr>
                       <th className="py-2 px-3 font-semibold text-slate-600 w-20 text-center">番号</th>
                       <th className="py-2 px-3 font-semibold text-slate-600">氏名</th>
+                      <th className="py-2 px-3 font-semibold text-slate-600">ふりがな</th>
+                      <th className="py-2 px-3 font-semibold text-slate-600 w-24">性別</th>
                       <th className="py-2 px-3 font-semibold text-slate-600 w-16 text-center">操作</th>
                     </tr>
                   </thead>
@@ -626,7 +664,18 @@
                           <input type="number" value={s.number} onChange={e => updateStudent(s.id, 'number', Number(e.target.value))} className="w-16 p-1.5 text-center border border-slate-200 rounded focus:ring-blue-500 bg-transparent" />
                         </td>
                         <td className="py-1 px-3">
-                          <input type="text" value={s.name} onChange={e => updateStudent(s.id, 'name', e.target.value)} className="w-full max-w-xs p-1.5 border border-slate-200 rounded focus:ring-blue-500 bg-transparent" placeholder="氏名" />
+                          <input type="text" value={s.name} onChange={e => updateStudent(s.id, 'name', e.target.value)} className="w-full p-1.5 border border-slate-200 rounded focus:ring-blue-500 bg-transparent" placeholder="氏名" />
+                        </td>
+                        <td className="py-1 px-3">
+                          <input type="text" value={s.kana || ""} onChange={e => updateStudent(s.id, 'kana', e.target.value)} className="w-full p-1.5 border border-slate-200 rounded focus:ring-blue-500 bg-transparent" placeholder="ふりがな" />
+                        </td>
+                        <td className="py-1 px-3">
+                          <select value={s.gender || "未設定"} onChange={e => updateStudent(s.id, 'gender', e.target.value)} className="w-full p-1.5 border border-slate-200 rounded focus:ring-blue-500 bg-transparent">
+                            <option value="未設定">未設定</option>
+                            <option value="男">男</option>
+                            <option value="女">女</option>
+                            <option value="その他">その他</option>
+                          </select>
                         </td>
                         <td className="py-1 px-3 text-center">
                           <button onClick={() => deleteStudent(s.id)} className="p-1.5 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded transition-colors">
@@ -636,7 +685,7 @@
                       </tr>
                     ))}
                     {activeClass.students.length === 0 && (
-                      <tr><td colSpan="3" className="py-8 text-center text-slate-400">生徒が登録されていません。</td></tr>
+                      <tr><td colSpan="5" className="py-8 text-center text-slate-400">生徒が登録されていません。</td></tr>
                     )}
                   </tbody>
                 </table>
@@ -652,11 +701,11 @@
                     <button onClick={() => setBulkImport({ show: false, text: '' })} className="text-slate-400 hover:text-slate-600"><X className="w-5 h-5"/></button>
                   </div>
                   <div className="p-5">
-                    <p className="text-xs text-slate-500 mb-2">エクセルやスプレッドシートから「番号」「氏名」の列をコピーして貼り付けてください。</p>
+                    <p className="text-xs text-slate-500 mb-2">エクセルやスプレッドシートから「番号」「氏名」「ふりがな」「性別」の列をコピーして貼り付けてください。</p>
                     <textarea
                       autoFocus
                       value={bulkImport.text} onChange={e => setBulkImport({ ...bulkImport, text: e.target.value })}
-                      placeholder="1 山田太郎&#10;2 佐藤花子"
+                      placeholder="1 山田太郎 やまだたろう 男&#10;2 佐藤花子 さとうはなこ 女"
                       className="w-full h-48 border border-slate-300 rounded-lg p-3 text-sm focus:ring-2 focus:ring-indigo-500"
                     />
                   </div>
