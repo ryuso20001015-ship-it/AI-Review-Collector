@@ -737,7 +737,8 @@ ${JSON.stringify(targetData, null, 2)}
                   <thead className="bg-slate-100 text-slate-600 border-b border-slate-200">
                     <tr>
                       <th className="p-2 w-10 text-center">番</th>
-                      <th className="p-2 w-32">氏名</th>
+                      <th className="p-2 w-40">氏名</th>
+                      <th className="p-2 w-16 text-center">性別</th>
                       <th className="p-2 w-20 text-center">出欠</th>
                       <th className="p-2 min-w-[250px]">振り返りテキスト</th>
                       <th className="p-2 w-20 text-center">AI評価</th>
@@ -752,7 +753,15 @@ ${JSON.stringify(targetData, null, 2)}
                       return (
                         <tr key={s.id} className={`border-b border-slate-100 hover:bg-slate-50 ${isAbsent ? 'bg-slate-50 opacity-60' : ''}`}>
                           <td className="p-2 text-center text-slate-500 font-bold">{s.number}</td>
-                          <td className="p-2 font-bold text-slate-700">{s.name}</td>
+                          <td className="p-2 font-bold text-slate-700">
+                            <ruby>
+                              {s.name}
+                              <rt className="text-[10px] text-slate-400 font-normal">{s.furigana}</rt>
+                            </ruby>
+                          </td>
+                          <td className="p-2 text-center text-slate-500 text-xs">
+                            {s.gender}
+                          </td>
                           <td className="p-2 text-center">
                             <select value={rev.attendance} onChange={e => updateReview(s.id, { attendance: e.target.value })} className={`border rounded px-1 py-0.5 text-xs font-bold outline-none cursor-pointer ${rev.attendance === '欠席' ? 'bg-red-100 text-red-700 border-red-200' : 'bg-white text-slate-600 border-slate-300'}`}>
                               <option value="出席">出席</option>
@@ -812,10 +821,10 @@ ${JSON.stringify(targetData, null, 2)}
       const exportCSV = () => {
         if (!activeClass) return;
         let csvContent = "\uFEFF"; // BOM
-        csvContent += `番号,氏名,${classLessons.map(l => l.title || '無題').join(',')},A,B,C\n`;
+        csvContent += `番号,氏名,ふりがな,性別,${classLessons.map(l => l.title || '無題').join(',')},A,B,C\n`;
 
         (activeClass.students || []).forEach(s => {
-          let row = [s.number, s.name];
+          let row = [s.number, s.name, s.furigana || '', s.gender || ''];
           let a=0, b=0, c=0;
           classLessons.forEach(l => {
             const ev = getFinalEval(l.id, s.id);
@@ -860,6 +869,7 @@ ${JSON.stringify(targetData, null, 2)}
                 <tr>
                   <th className="border border-slate-300 p-2 w-10">番</th>
                   <th className="border border-slate-300 p-2 w-32 text-left">氏名</th>
+                  <th className="border border-slate-300 p-2 w-16 text-center">性別</th>
                   {classLessons.map(l => (
                     <th key={l.id} className="border border-slate-300 p-1 w-12 text-[10px] leading-tight">
                       第{l.count}回<br/><span className="font-normal">{l.date ? String(l.date).substring(5).replace('-','/') : '-'}</span>
@@ -876,7 +886,13 @@ ${JSON.stringify(targetData, null, 2)}
                   return (
                     <tr key={s.id} className="hover:bg-slate-50 border-b border-slate-200">
                       <td className="border border-slate-300 p-1 text-slate-500">{s.number}</td>
-                      <td className="border border-slate-300 p-1 text-left font-bold text-slate-700">{s.name}</td>
+                      <td className="border border-slate-300 p-1 text-left font-bold text-slate-700">
+                        <ruby>
+                          {s.name}
+                          <rt className="text-[10px] text-slate-400 font-normal">{s.furigana}</rt>
+                        </ruby>
+                      </td>
+                      <td className="border border-slate-300 p-1 text-center text-slate-500 text-xs">{s.gender}</td>
                       {classLessons.map(l => {
                         const ev = getFinalEval(l.id, s.id);
                         if(ev==='A') a++; if(ev==='B') b++; if(ev==='C') c++;
@@ -998,6 +1014,16 @@ ${JSON.stringify(targetData, null, 2)}
         });
       };
 
+      const removeStudent = (studentId) => {
+        if(!window.confirm("【警告】\nこの生徒を完全に削除すると、過去の評価データも全て消去されてしまいます。\n\n※年度途中の転出等の場合は、削除せずに「状態」を「転出」に変更することをお勧めします。\n\n本当に完全に削除してよろしいですか？")) return;
+        setAppData({
+          ...appData,
+          classes: appData.classes.map(c => c.classId === activeClassId ? {
+            ...c, students: c.students.filter(s => s.id !== studentId)
+          } : c)
+        });
+      };
+
       const processBulkImport = () => {
         if(!activeClass || !bulkImport.text.trim()) { setBulkImport({ show: false, text: '' }); return; }
         const lines = bulkImport.text.split('\n').filter(l => l.trim() !== '');
@@ -1073,6 +1099,7 @@ ${JSON.stringify(targetData, null, 2)}
                       <th className="p-2">ふりがな</th>
                       <th className="p-2 w-20">性別</th>
                       <th className="p-2 w-24">状態</th>
+                      <th className="p-2 w-16">削除</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -1090,6 +1117,11 @@ ${JSON.stringify(targetData, null, 2)}
                           <select value={s.status} onChange={e => handleStudentChange(s.id, 'status', e.target.value)} className="w-full border rounded p-1 font-bold">
                             <option value="在籍">在籍</option><option value="転出">転出</option><option value="休学">休学</option>
                           </select>
+                        </td>
+                        <td className="p-1 text-center">
+                          <button onClick={() => removeStudent(s.id)} className="p-2 text-red-500 hover:bg-red-50 rounded transition-colors" title="削除">
+                            <i className="fa-solid fa-trash"></i>
+                          </button>
                         </td>
                       </tr>
                     ))}
