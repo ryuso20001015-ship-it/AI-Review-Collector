@@ -60,7 +60,7 @@
       0% { width: 0%; }
       20% { width: 40%; }
       60% { width: 75%; }
-      100% { width: 95%; } /* API完了時に強制的に消えるため95%止め */
+      100% { width: 95%; } 
     }
     .animate-progress-bar {
       animation: progress-bar 10s cubic-bezier(0.1, 0, 0.2, 1) forwards;
@@ -139,14 +139,11 @@
       return `${year}-${month}-${day}`;
     };
 
-    const DEFAULT_RUBRIC = `・観点1：内容理解・充実度（授業内容や専門用語を正しく記述しているか）
-・観点2：実生活とのつながり（自分の生活や社会課題と結びつけて考察しているか）
-・観点3：新たな疑問や課題（次に向けて工夫したいことなどを見出しているか）
-
-【判定条件】
-・C評価：記述が極端に短い、または授業の主旨と関係ない。
-・B評価：授業内容の要約や理解（観点1）が基本レベルでできている。
-・A評価：観点1が非常に充実している、または観点1に加えて観点2や観点3の記述が含まれており、より深い考察ができている。`;
+    const DEFAULT_RUBRIC = {
+      knowledge: "・授業内容や専門用語を正しく記述しているか。\n\n【判定条件】\n・C評価：関係ない記述。\n・B評価：基本レベルの要約ができている。\n・A評価：非常に充実している。",
+      thinking: "・自分の生活や社会課題と結びつけて考察しているか。\n\n【判定条件】\n・C評価：考察がない。\n・B評価：少し触れている。\n・A評価：深く考察できている。",
+      attitude: "・新たな疑問や課題、次に向けて工夫したいことなどを見出しているか。\n\n【判定条件】\n・C評価：見出していない。\n・B評価：少し書かれている。\n・A評価：具体的に見出している。"
+    };
 
     const DEFAULT_DATA = {
       settings: { grades: { 1: 1, 2: 0, 3: 0 }, geminiApiKey: "", attendanceSyncCode: "" },
@@ -184,9 +181,49 @@
               })) : []
             }))
           : DEFAULT_DATA.classes,
-        rubrics: parsed.rubrics || { "1": DEFAULT_RUBRIC, "2": DEFAULT_RUBRIC, "3": DEFAULT_RUBRIC },
+        rubrics: (() => {
+          const r = parsed.rubrics || {};
+          const result = { "1": DEFAULT_RUBRIC, "2": DEFAULT_RUBRIC, "3": DEFAULT_RUBRIC };
+          for (let g of ["1", "2", "3"]) {
+            if (r[g]) {
+              if (typeof r[g] === 'string') {
+                result[g] = DEFAULT_RUBRIC;
+              } else if (typeof r[g] === 'object' && r[g].knowledge) {
+                result[g] = r[g];
+              }
+            }
+          }
+          return result;
+        })(),
         lessons: Array.isArray(parsed.lessons) ? parsed.lessons : [],
-        reviews: parsed.reviews || {}
+        reviews: (() => {
+          const revs = parsed.reviews || {};
+          const newRevs = {};
+          for (let key in revs) {
+            let rev = revs[key];
+            let newAiEval = { k: "", t: "", a: "" };
+            let newManualEval = { k: "", t: "", a: "" };
+            
+            if (rev.aiEval && typeof rev.aiEval === 'string') {
+               newAiEval = { k: rev.aiEval, t: rev.aiEval, a: rev.aiEval };
+            } else if (rev.aiEval && typeof rev.aiEval === 'object') {
+               newAiEval = { k: rev.aiEval.k || "", t: rev.aiEval.t || "", a: rev.aiEval.a || "" };
+            }
+
+            if (rev.manualEval && typeof rev.manualEval === 'string') {
+               newManualEval = { k: rev.manualEval, t: rev.manualEval, a: rev.manualEval };
+            } else if (rev.manualEval && typeof rev.manualEval === 'object') {
+               newManualEval = { k: rev.manualEval.k || "", t: rev.manualEval.t || "", a: rev.manualEval.a || "" };
+            }
+
+            newRevs[key] = {
+              ...rev,
+              aiEval: newAiEval,
+              manualEval: newManualEval
+            };
+          }
+          return newRevs;
+        })()
       };
     };
 
@@ -217,11 +254,18 @@
     // ==========================================
     const callGeminiAPI = async (apiKey, rubric, targetData) => {
       const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`;
-      const prompt = `以下の生徒の振り返りテキストを、指定した評価基準に従って「A」「B」「C」の3段階で評価してください。
-また、その評価に至った理由を簡潔（50文字以内）に記述してください。
+      const prompt = `以下の生徒の振り返りテキストを、3つの評価基準「知識・技能（k）」「思考・判断・表現（t）」「主体的に学習に取り組む態度（a）」それぞれについて、「A」「B」「C」の3段階で評価してください。
+また、全体としての評価理由を簡潔（50文字以内）に記述してください。
 
 【評価基準】
-${rubric}
+■ 知識・技能（k）
+${rubric.knowledge}
+
+■ 思考・判断・表現（t）
+${rubric.thinking}
+
+■ 主体的に学習に取り組む態度（a）
+${rubric.attitude}
 
 【生徒のテキスト（JSON形式）】
 ${JSON.stringify(targetData)}
@@ -231,7 +275,11 @@ ${JSON.stringify(targetData)}
 [
   {
     "studentId": "生徒のID",
-    "aiEval": "A または B または C",
+    "aiEval": {
+      "k": "A または B または C",
+      "t": "A または B または C",
+      "a": "A または B または C"
+    },
     "aiReason": "評価の理由"
   }
 ]`;
@@ -261,8 +309,11 @@ ${JSON.stringify(targetData)}
 【生徒の振り返りテキスト（抜粋）】
 ${JSON.stringify(targetData, null, 2)}
 
-【出力形式】
-以下の要素を含め、Markdown形式（箇条書き）で**非常に簡潔に（各項目2〜3文程度）**記述してください。長文は避け、要点のみをまとめてください。
+【出力形式の厳守事項】
+・挨拶や前置き（「はい、承知しました」等）は一切書かないでください。分析結果のみを直接出力してください。
+・マークダウン記号（** や # など）は一切使用しないでください。
+・以下の3項目について、それぞれ2〜3文程度で非常に簡潔に記述してください。
+
 1. クラス全体の理解度と傾向
 2. 共通して見られるつまずきや疑問点
 3. 次回の授業に向けたアドバイス`;
@@ -282,6 +333,66 @@ ${JSON.stringify(targetData, null, 2)}
       const data = await response.json();
       return data.candidates[0].content.parts[0].text;
     };
+
+
+    // ==========================================
+    // 共通UIコンポーネント: クラス選択 (ボタン形式)
+    // ==========================================
+    function ClassSelector({ classes, activeClassId, setActiveClassId }) {
+      const [activeGradeTab, setActiveGradeTab] = useState(activeClassId ? activeClassId.split('-')[0] : "1");
+
+      useEffect(() => {
+        if (activeClassId) {
+          setActiveGradeTab(activeClassId.split('-')[0]);
+        }
+      }, [activeClassId]);
+
+      return (
+        <div className="flex items-center gap-2 flex-wrap pb-1">
+          <div className="flex gap-1 flex-wrap">
+            {[1, 2, 3].map(g => {
+              const hasClasses = classes.some(c => c.classId.startsWith(`${g}-`));
+              if (!hasClasses) return null;
+              return (
+                <button
+                  key={`grade-${g}`}
+                  onClick={() => {
+                    setActiveGradeTab(g.toString());
+                    const firstClass = classes.find(c => c.classId.startsWith(`${g}-`));
+                    if (firstClass) setActiveClassId(firstClass.classId);
+                  }}
+                  className={`px-3 py-1.5 rounded text-sm font-bold transition-colors border ${
+                    activeGradeTab === g.toString()
+                      ? 'bg-blue-600 text-white border-blue-600 shadow-sm'
+                      : 'bg-white text-slate-600 border-slate-300 hover:bg-slate-50'
+                  }`}
+                >
+                  {g}年
+                </button>
+              );
+            })}
+          </div>
+
+          <i className="fa-solid fa-angle-right text-slate-300 text-sm mx-1 hidden sm:block"></i>
+
+          <div className="flex gap-1 flex-wrap">
+            {classes.filter(c => c.classId.startsWith(`${activeGradeTab}-`)).map(c => (
+              <button
+                key={c.classId}
+                onClick={() => setActiveClassId(c.classId)}
+                className={`px-3 py-1.5 rounded text-sm font-bold transition-colors border ${
+                  activeClassId === c.classId
+                    ? 'bg-blue-600 text-white border-blue-600 shadow-sm'
+                    : 'bg-white text-slate-600 border-slate-300 hover:bg-slate-50'
+                }`}
+              >
+                {c.className.replace(`${activeGradeTab}年`, '')}
+              </button>
+            ))}
+          </div>
+        </div>
+      );
+    }
 
 
     // ==========================================
@@ -498,9 +609,9 @@ ${JSON.stringify(targetData, null, 2)}
       };
 
       const getReview = (studentId) => {
-        if(!activeLesson) return { attendance: "未", text: "", aiEval: "", aiReason: "", manualEval: "" };
+        if(!activeLesson) return { attendance: "未", text: "", aiEval: {k:"", t:"", a:""}, aiReason: "", manualEval: {k:"", t:"", a:""} };
         const reviews = appData.reviews || {};
-        return reviews[`${activeLesson.id}_${studentId}`] || { attendance: "未", text: "", aiEval: "", aiReason: "", manualEval: "" };
+        return reviews[`${activeLesson.id}_${studentId}`] || { attendance: "未", text: "", aiEval: {k:"", t:"", a:""}, aiReason: "", manualEval: {k:"", t:"", a:""} };
       };
 
       const updateReview = (studentId, updates) => {
@@ -541,15 +652,11 @@ ${JSON.stringify(targetData, null, 2)}
                   
                   let status = "出席";
                   if (attRecord && attRecord.status) {
-                    if (attRecord.status === "保健室" || attRecord.status === "その他") {
-                      status = "他";
-                    } else {
-                      status = attRecord.status;
-                    }
+                    status = attRecord.status;
                   }
                   
                   const key = `${activeLesson.id}_${s.id}`;
-                  const current = newReviews[key] || { attendance: "未", text: "", aiEval: "", aiReason: "", manualEval: "" };
+                  const current = newReviews[key] || { attendance: "未", text: "", aiEval: {k:"", t:"", a:""}, aiReason: "", manualEval: {k:"", t:"", a:""} };
                   newReviews[key] = { ...current, attendance: status };
                   syncCount++;
                 }
@@ -583,7 +690,7 @@ ${JSON.stringify(targetData, null, 2)}
         activeStudents.forEach((s, index) => {
           if (lines[index] !== undefined) {
             const key = `${activeLesson.id}_${s.id}`;
-            const current = newReviews[key] || { attendance: "未", aiEval: "", aiReason: "", manualEval: "" };
+            const current = newReviews[key] || { attendance: "未", aiEval: {k:"", t:"", a:""}, aiReason: "", manualEval: {k:"", t:"", a:""} };
             newReviews[key] = { ...current, text: lines[index] };
           }
         });
@@ -603,7 +710,8 @@ ${JSON.stringify(targetData, null, 2)}
 
         const targetStudents = activeClass.students.filter(s => {
           const rev = getReview(s.id);
-          return rev.text && !rev.aiEval && rev.attendance !== "欠席";
+          const notEvaluated = !rev.aiEval || !rev.aiEval.k || !rev.aiEval.t || !rev.aiEval.a;
+          return rev.text && notEvaluated && rev.attendance !== "欠席";
         });
 
         if (targetStudents.length === 0) return showToast("未評価のテキストがありません。", "info");
@@ -620,10 +728,14 @@ ${JSON.stringify(targetData, null, 2)}
           const newReviews = { ...(appData.reviews || {}) };
           let successCount = 0;
           results.forEach(res => {
-            if (res.studentId && res.aiEval) {
+            if (res.studentId && res.aiEval && res.aiEval.k && res.aiEval.t && res.aiEval.a) {
               const key = `${activeLesson.id}_${res.studentId}`;
               if (newReviews[key]) {
-                newReviews[key].aiEval = res.aiEval;
+                newReviews[key].aiEval = {
+                  k: res.aiEval.k,
+                  t: res.aiEval.t,
+                  a: res.aiEval.a
+                };
                 newReviews[key].aiReason = res.aiReason || "";
                 successCount++;
               }
@@ -657,8 +769,9 @@ ${JSON.stringify(targetData, null, 2)}
           }));
 
           const resultText = await callGeminiOverallAnalysisAPI(appData.settings.geminiApiKey, targetData);
+          const cleanText = resultText.replace(/\*\*/g, ''); // マークダウン等を除去
           
-          updateLesson(activeLesson.id, 'overallAnalysis', resultText);
+          updateLesson(activeLesson.id, 'overallAnalysis', cleanText);
           showToast(`授業全体の分析が完了しました。`, "success");
         } catch (e) {
           console.error(e);
@@ -671,41 +784,51 @@ ${JSON.stringify(targetData, null, 2)}
       if (!activeClass) return <div className="text-center p-8 text-slate-500">クラスが設定されていません。</div>;
 
       const evalColor = (evalStr) => {
-        if (evalStr === 'A') return "bg-emerald-100 text-emerald-800 border-emerald-300";
-        if (evalStr === 'B') return "bg-blue-100 text-blue-800 border-blue-300";
+        if (evalStr === 'A') return "bg-blue-100 text-blue-800 border-blue-300";
+        if (evalStr === 'B') return "bg-emerald-100 text-emerald-800 border-emerald-300";
         if (evalStr === 'C') return "bg-orange-100 text-orange-800 border-orange-300";
         return "bg-slate-100 text-slate-400 border-slate-200";
       };
 
       const attendanceSelectClass = (att) => {
-        if (att === '欠席') return 'bg-red-100 text-red-700 border-red-200';
-        if (att === '未') return 'bg-slate-100 text-slate-500 border-slate-300 font-normal';
-        return 'bg-white text-slate-600 border-slate-300';
+        if (att === '欠席') return 'bg-red-50 text-red-800 border-red-200';
+        if (att === '遅刻') return 'bg-yellow-50 text-yellow-800 border-yellow-200';
+        if (att === '早退') return 'bg-orange-50 text-orange-800 border-orange-200';
+        if (att === '保健室') return 'bg-green-50 text-green-800 border-green-200';
+        if (att === 'その他') return 'bg-slate-100 text-slate-700 border-slate-300';
+        if (att === '未') return 'bg-slate-50 text-slate-400 border-slate-200 font-normal';
+        return 'bg-white text-slate-800 border-slate-300'; // 出席
       };
 
       return (
         <div className="space-y-4">
-          <div className="bg-white p-3 rounded-lg shadow-sm border border-slate-200 flex flex-wrap gap-4 items-center justify-between">
-            <div className="flex gap-2 items-center flex-wrap">
-              <select value={activeClassId} onChange={e => setActiveClassId(e.target.value)} className="border border-slate-300 rounded p-1.5 text-sm font-bold bg-slate-50 text-slate-700 outline-none focus:ring-2 focus:ring-blue-500">
-                {appData.classes.map(c => <option key={c.classId} value={c.classId}>{c.className}</option>)}
-              </select>
-              <i className="fa-solid fa-angle-right text-slate-300"></i>
-              {classLessons.length > 0 ? (
-                <select value={activeLessonId} onChange={e => setActiveLessonId(e.target.value)} className="border border-slate-300 rounded p-1.5 text-sm font-bold bg-slate-50 text-slate-700 outline-none focus:ring-2 focus:ring-blue-500">
-                  {classLessons.map(l => <option key={l.id} value={l.id}>{l.title} ({l.date})</option>)}
-                </select>
-              ) : (
-                <span className="text-sm text-slate-400">授業がありません</span>
-              )}
-              <button onClick={addLesson} className="text-sm bg-slate-100 hover:bg-slate-200 text-slate-600 px-3 py-1.5 rounded font-bold border border-slate-300 transition-colors">
-                <i className="fa-solid fa-plus"></i> 追加
-              </button>
-              {activeLesson && (
-                <button onClick={deleteLesson} className="text-sm bg-red-50 hover:bg-red-100 text-red-600 px-3 py-1.5 rounded font-bold border border-red-200 transition-colors ml-1">
-                  <i className="fa-solid fa-trash"></i> 削除
+          <div className="flex flex-col items-center mb-4 print:hidden">
+            <h2 className="text-xl sm:text-2xl font-bold text-slate-700 text-center tracking-wider">{activeClass.className} 授業別評価</h2>
+          </div>
+
+          <div className="bg-white p-3 rounded-lg shadow-sm border border-slate-200 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div className="flex items-center gap-2 flex-wrap">
+              <ClassSelector classes={appData.classes} activeClassId={activeClassId} setActiveClassId={setActiveClassId} />
+              
+              <div className="h-6 w-px bg-slate-200 hidden sm:block mx-1"></div>
+              
+              <div className="flex items-center gap-2 flex-wrap sm:ml-1">
+                {classLessons.length > 0 ? (
+                  <select value={activeLessonId} onChange={e => setActiveLessonId(e.target.value)} className="border border-slate-300 rounded p-1.5 text-sm font-bold bg-slate-50 text-slate-700 outline-none focus:ring-2 focus:ring-blue-500">
+                    {classLessons.map(l => <option key={l.id} value={l.id}>{l.title} ({l.date})</option>)}
+                  </select>
+                ) : (
+                  <span className="text-sm text-slate-400 font-bold ml-1">授業なし</span>
+                )}
+                <button onClick={addLesson} className="text-sm bg-slate-100 hover:bg-slate-200 text-slate-600 px-3 py-1.5 rounded font-bold border border-slate-300 transition-colors shadow-sm">
+                  <i className="fa-solid fa-plus"></i> 授業追加
                 </button>
-              )}
+                {activeLesson && (
+                  <button onClick={deleteLesson} className="text-sm bg-red-50 hover:bg-red-100 text-red-600 px-3 py-1.5 rounded font-bold border border-red-200 transition-colors shadow-sm ml-1">
+                    <i className="fa-solid fa-trash"></i> 削除
+                  </button>
+                )}
+              </div>
             </div>
           </div>
 
@@ -721,10 +844,10 @@ ${JSON.stringify(targetData, null, 2)}
                   <input type="date" value={activeLesson.date} onChange={e => updateLesson(activeLesson.id, 'date', e.target.value)} className="border border-slate-300 rounded p-2 text-sm focus:ring-2 focus:ring-blue-500" />
                 </div>
                 <div className="flex gap-2">
-                  <button onClick={syncAttendanceFromCloud} className="bg-amber-100 hover:bg-amber-200 text-amber-800 border border-amber-300 px-3 py-2 rounded text-sm font-bold transition-colors flex items-center gap-1.5">
+                  <button onClick={syncAttendanceFromCloud} className="bg-amber-100 hover:bg-amber-200 text-amber-800 border border-amber-300 px-3 py-2 rounded text-sm font-bold transition-colors flex items-center gap-1.5 shadow-sm">
                     <i className="fa-solid fa-sync"></i> 出欠反映
                   </button>
-                  <button onClick={() => setIsPasteMode(true)} className="bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 px-3 py-2 rounded text-sm font-bold transition-colors flex items-center gap-1.5">
+                  <button onClick={() => setIsPasteMode(true)} className="bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 px-3 py-2 rounded text-sm font-bold transition-colors flex items-center gap-1.5 shadow-sm">
                     <i className="fa-solid fa-paste"></i> テキスト流し込み
                   </button>
                 </div>
@@ -788,18 +911,27 @@ ${JSON.stringify(targetData, null, 2)}
                 </div>
               </div>
 
+              {/* ★ テーブルのヘッダーを「中央揃え＆フォントサイズ統一（text-sm）」 */}
               <div className="overflow-x-auto border border-slate-200 rounded-lg">
                 <table className="w-full text-sm text-left whitespace-nowrap">
                   <thead className="bg-slate-100 text-slate-600 border-b border-slate-200">
                     <tr>
-                      <th className="p-2 w-12 text-center">番号</th>
-                      <th className="p-2 w-48 text-left">氏名</th>
-                      <th className="p-2 w-16 text-center">性別</th>
-                      <th className="p-2 w-20 text-center">出欠</th>
-                      <th className="p-2 min-w-[250px]">振り返りテキスト</th>
-                      <th className="p-2 w-20 text-center">AI評価</th>
-                      <th className="p-2 min-w-[150px]">AIの理由</th>
-                      <th className="p-2 w-24 text-center">最終評価</th>
+                      <th rowSpan={2} className="p-2 w-12 text-center border-r border-slate-200 align-middle text-sm font-bold">番号</th>
+                      <th rowSpan={2} className="p-2 w-40 text-center border-r border-slate-200 align-middle text-sm font-bold">氏名</th>
+                      <th rowSpan={2} className="p-2 w-12 text-center border-r border-slate-200 align-middle text-sm font-bold">性別</th>
+                      <th rowSpan={2} className="p-2 w-20 text-center border-r border-slate-200 align-middle text-sm font-bold">出欠</th>
+                      <th rowSpan={2} className="p-2 min-w-[200px] w-auto text-center border-r border-slate-200 align-middle text-sm font-bold">振り返りテキスト</th>
+                      <th colSpan={3} className="p-1.5 text-center border-b border-r border-slate-200 text-sm font-bold">AI評価</th>
+                      <th rowSpan={2} className="p-2 min-w-[120px] text-center border-r border-slate-200 align-middle text-sm font-bold">AIの理由</th>
+                      <th colSpan={3} className="p-1.5 text-center border-b border-slate-200 text-sm font-bold">最終評価</th>
+                    </tr>
+                    <tr>
+                      <th className="p-1 text-center text-xs w-10 border-r border-slate-200 bg-slate-50">知</th>
+                      <th className="p-1 text-center text-xs w-10 border-r border-slate-200 bg-slate-50">思</th>
+                      <th className="p-1 text-center text-xs w-10 border-r border-slate-200 bg-slate-50">主</th>
+                      <th className="p-1 text-center text-xs w-10 border-r border-slate-200 bg-slate-50">知</th>
+                      <th className="p-1 text-center text-xs w-10 border-r border-slate-200 bg-slate-50">思</th>
+                      <th className="p-1 text-center text-xs w-10 bg-slate-50">主</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -808,46 +940,65 @@ ${JSON.stringify(targetData, null, 2)}
                       const isAbsent = rev.attendance === "欠席" || s.status !== "在籍";
                       return (
                         <tr key={s.id} className={`border-b border-slate-100 hover:bg-slate-50 ${isAbsent ? 'bg-slate-50 opacity-60' : ''}`}>
-                          <td className="p-2 text-center text-slate-500 font-bold">{s.number}</td>
-                          <td className="p-2 text-left">
+                          <td className="p-2 text-center text-slate-500 font-bold align-top bg-white">{s.number}</td>
+                          <td className="p-2 text-left align-top bg-white">
                             <div className="flex flex-col">
                               <div className="flex items-center gap-1.5">
-                                <span className="font-bold text-slate-700 text-base">{s.name}</span>
+                                <span className="font-bold text-slate-700 text-base whitespace-nowrap">{s.name}</span>
                                 {s.status !== "在籍" && <span className="text-[10px] bg-red-100 text-red-700 px-1 py-0.5 rounded font-bold border border-red-200 leading-none">{s.status}</span>}
                               </div>
-                              <span className="text-xs text-slate-400 font-normal mt-0.5">{s.furigana}</span>
+                              <span className="text-xs text-slate-400 font-normal mt-0.5 whitespace-nowrap">{s.furigana}</span>
                             </div>
                           </td>
-                          <td className="p-2 text-center text-slate-600 text-sm">
+                          <td className="p-2 text-center text-slate-600 text-sm align-top bg-white">
                             {s.gender}
                           </td>
-                          <td className="p-2 text-center">
-                            <select value={rev.attendance} onChange={e => updateReview(s.id, { attendance: e.target.value })} className={`border rounded px-1 py-1 text-xs font-bold outline-none cursor-pointer ${attendanceSelectClass(rev.attendance)}`}>
+                          <td className="p-2 text-center align-top border-r border-slate-100 bg-white">
+                            <select value={rev.attendance} onChange={e => updateReview(s.id, { attendance: e.target.value })} className={`border rounded px-1 py-1 text-xs font-bold outline-none cursor-pointer w-full text-center ${attendanceSelectClass(rev.attendance)}`}>
                               <option value="未">未</option>
                               <option value="出席">出席</option>
                               <option value="欠席">欠席</option>
                               <option value="遅刻">遅刻</option>
                               <option value="早退">早退</option>
-                              <option value="他">他</option>
+                              <option value="保健室">保健室</option>
+                              <option value="その他">他</option>
                             </select>
                           </td>
-                          <td className="p-2">
-                            <input type="text" value={rev.text} onChange={e => updateReview(s.id, { text: e.target.value })} disabled={isAbsent} className="w-full border border-slate-200 rounded px-2 py-1.5 text-sm focus:ring-2 focus:ring-blue-500 disabled:bg-transparent disabled:border-transparent" placeholder={isAbsent ? "-" : "テキストを入力..."} />
+                          <td className="p-2 align-top border-r border-slate-100 bg-white">
+                            <textarea 
+                              value={rev.text} 
+                              onChange={e => updateReview(s.id, { text: e.target.value })} 
+                              disabled={isAbsent} 
+                              rows={2}
+                              className="w-full border border-slate-200 rounded px-2 py-1.5 text-sm focus:ring-2 focus:ring-blue-500 disabled:bg-transparent disabled:border-transparent resize-y min-h-[44px] leading-relaxed" 
+                              placeholder={isAbsent ? "-" : "テキストを入力..."} 
+                            />
                           </td>
-                          <td className="p-2 text-center">
-                            <div className={`inline-flex items-center justify-center w-6 h-6 rounded border font-bold text-xs ${evalColor(rev.aiEval)}`}>
-                              {rev.aiEval || "-"}
-                            </div>
+                          <td className="p-1 text-center align-middle border-r border-slate-100 bg-white">
+                            <div className={`inline-flex items-center justify-center w-6 h-6 rounded border font-bold text-xs ${evalColor(rev.aiEval?.k)}`}>{rev.aiEval?.k || "-"}</div>
                           </td>
-                          <td className="p-2 text-[10px] text-slate-500 whitespace-normal leading-tight">
+                          <td className="p-1 text-center align-middle border-r border-slate-100 bg-white">
+                            <div className={`inline-flex items-center justify-center w-6 h-6 rounded border font-bold text-xs ${evalColor(rev.aiEval?.t)}`}>{rev.aiEval?.t || "-"}</div>
+                          </td>
+                          <td className="p-1 text-center align-middle border-r border-slate-200 bg-white">
+                            <div className={`inline-flex items-center justify-center w-6 h-6 rounded border font-bold text-xs ${evalColor(rev.aiEval?.a)}`}>{rev.aiEval?.a || "-"}</div>
+                          </td>
+                          <td className="p-2 text-[10px] text-slate-500 whitespace-normal leading-tight align-top border-r border-slate-200 bg-white">
                             {rev.aiReason}
                           </td>
-                          <td className="p-2 text-center">
-                            <select value={rev.manualEval || rev.aiEval || ""} onChange={e => updateReview(s.id, { manualEval: e.target.value })} disabled={isAbsent} className={`border rounded px-2 py-1 text-xs font-bold outline-none cursor-pointer ${evalColor(rev.manualEval || rev.aiEval)}`}>
-                              <option value="">-</option>
-                              <option value="A">A</option>
-                              <option value="B">B</option>
-                              <option value="C">C</option>
+                          <td className="p-1 text-center align-middle border-r border-slate-100 bg-white">
+                            <select value={rev.manualEval?.k || rev.aiEval?.k || ""} onChange={e => updateReview(s.id, { manualEval: { ...rev.manualEval, k: e.target.value } })} disabled={isAbsent} className={`border rounded px-1 py-1 text-xs font-bold outline-none cursor-pointer w-full text-center ${evalColor(rev.manualEval?.k || rev.aiEval?.k)}`}>
+                              <option value="">-</option><option value="A">A</option><option value="B">B</option><option value="C">C</option>
+                            </select>
+                          </td>
+                          <td className="p-1 text-center align-middle border-r border-slate-100 bg-white">
+                            <select value={rev.manualEval?.t || rev.aiEval?.t || ""} onChange={e => updateReview(s.id, { manualEval: { ...rev.manualEval, t: e.target.value } })} disabled={isAbsent} className={`border rounded px-1 py-1 text-xs font-bold outline-none cursor-pointer w-full text-center ${evalColor(rev.manualEval?.t || rev.aiEval?.t)}`}>
+                              <option value="">-</option><option value="A">A</option><option value="B">B</option><option value="C">C</option>
+                            </select>
+                          </td>
+                          <td className="p-1 text-center align-middle bg-white">
+                            <select value={rev.manualEval?.a || rev.aiEval?.a || ""} onChange={e => updateReview(s.id, { manualEval: { ...rev.manualEval, a: e.target.value } })} disabled={isAbsent} className={`border rounded px-1 py-1 text-xs font-bold outline-none cursor-pointer w-full text-center ${evalColor(rev.manualEval?.a || rev.aiEval?.a)}`}>
+                              <option value="">-</option><option value="A">A</option><option value="B">B</option><option value="C">C</option>
                             </select>
                           </td>
                         </tr>
@@ -909,44 +1060,62 @@ ${JSON.stringify(targetData, null, 2)}
       const activeClass = appData.classes.find(c => c.classId === activeClassId);
       const classLessons = (appData.lessons || []).filter(l => l.classId === activeClassId).sort((a,b)=>a.count - b.count);
 
-      // セルに表示する全情報（出欠・テキスト・評価）を取得するヘルパー関数
+      // セルに表示する全情報を取得するヘルパー関数
       const getCellData = (lessonId, studentId) => {
         const reviews = appData.reviews || {};
         const rev = reviews[`${lessonId}_${studentId}`];
         if (!rev) return null;
         return {
           attendance: rev.attendance,
-          text: rev.text,
-          eval: rev.manualEval || rev.aiEval || ""
+          eval: {
+            k: rev.manualEval?.k || rev.aiEval?.k || "",
+            t: rev.manualEval?.t || rev.aiEval?.t || "",
+            a: rev.manualEval?.a || rev.aiEval?.a || ""
+          }
         };
       };
 
       const exportCSV = () => {
         if (!activeClass) return;
         let csvContent = "\uFEFF"; // BOM
-        csvContent += `番号,氏名,ふりがな,性別,${classLessons.map(l => l.title || '無題').join(',')},最終評価,A,B,C\n`;
+        csvContent += `番号,氏名,ふりがな,性別,`;
+        classLessons.forEach(l => {
+          csvContent += `${l.title}(知),${l.title}(思),${l.title}(主),`;
+        });
+        csvContent += `最終評価(知),最終評価(思),最終評価(主),知A,知B,知C,思A,思B,思C,主A,主B,主C\n`;
 
         (activeClass.students || []).forEach(s => {
           let row = [s.number, s.name, s.furigana || '', s.gender || ''];
-          let a=0, b=0, c=0;
+          let kA=0, kB=0, kC=0, tA=0, tB=0, tC=0, aA=0, aB=0, aC=0;
+          
           classLessons.forEach(l => {
             const data = getCellData(l.id, s.id);
-            const ev = data ? data.eval : "";
-            row.push(data && data.attendance === '欠席' ? '欠' : ev);
-            if(ev==='A') a++; if(ev==='B') b++; if(ev==='C') c++;
+            if (data && data.attendance === '欠席') {
+              row.push('欠', '欠', '欠');
+            } else {
+              row.push(data?.eval?.k || '', data?.eval?.t || '', data?.eval?.a || '');
+              if (data && data.attendance !== '欠席') {
+                if(data.eval.k==='A') kA++; else if(data.eval.k==='B') kB++; else if(data.eval.k==='C') kC++;
+                if(data.eval.t==='A') tA++; else if(data.eval.t==='B') tB++; else if(data.eval.t==='C') tC++;
+                if(data.eval.a==='A') aA++; else if(data.eval.a==='B') aB++; else if(data.eval.a==='C') aC++;
+              }
+            }
           });
 
-          // 最終評価の自動算出
-          let finalEval = "";
-          const totalEvalCount = a + b + c;
-          if (totalEvalCount > 0) {
-            const avg = (a * 3 + b * 2 + c * 1) / totalEvalCount;
-            if (avg >= 2.5) finalEval = "A";
-            else if (avg >= 1.5) finalEval = "B";
-            else finalEval = "C";
-          }
+          const calcFinal = (a, b, c) => {
+            const total = a + b + c;
+            if(total === 0) return "";
+            const avg = (a*3 + b*2 + c*1) / total;
+            if (avg >= 2.5) return "A";
+            if (avg >= 1.5) return "B";
+            return "C";
+          };
 
-          row.push(finalEval, a, b, c);
+          const finalK = calcFinal(kA, kB, kC);
+          const finalT = calcFinal(tA, tB, tC);
+          const finalA = calcFinal(aA, aB, aC);
+
+          row.push(finalK, finalT, finalA, kA, kB, kC, tA, tB, tC, aA, aB, aC);
           csvContent += row.join(',') + "\n";
         });
 
@@ -954,109 +1123,178 @@ ${JSON.stringify(targetData, null, 2)}
         const url = URL.createObjectURL(blob);
         const link = document.createElement("a");
         link.href = url;
-        link.download = `${activeClass.className}_累積評価.csv`;
+        link.download = `${activeClass.className}_累積評価_観点別.csv`;
         link.click();
       };
 
       if (!activeClass) return <div className="text-center p-8 text-slate-500">クラスがありません。</div>;
 
+      const evalColorText = (ev) => {
+        if (ev === 'A') return 'text-blue-600';
+        if (ev === 'B') return 'text-emerald-600';
+        if (ev === 'C') return 'text-orange-600';
+        return 'text-slate-400';
+      };
+
       return (
-        <div className="bg-white p-4 rounded-lg shadow-sm border border-slate-200 print-expand">
-          <div className="flex justify-between items-center mb-4 print-hidden border-b pb-3">
-            <div className="flex items-center gap-3">
-              <select value={activeClassId} onChange={e => setActiveClassId(e.target.value)} className="border border-slate-300 rounded p-1.5 text-sm font-bold bg-slate-50 text-slate-700 outline-none focus:ring-2 focus:ring-blue-500">
-                {appData.classes.map(c => <option key={c.classId} value={c.classId}>{c.className}</option>)}
-              </select>
-              <span className="text-xs text-slate-500 font-bold hidden sm:inline"><i className="fa-solid fa-circle-info text-blue-400"></i> 各回のセルには出欠状況と評価が表示されます。</span>
+        <div className="space-y-4">
+          {/* ★ページタイトルの統一・中央揃え */}
+          <div className="flex flex-col items-center mb-4 print:hidden">
+            <h2 className="text-xl sm:text-2xl font-bold text-slate-700 text-center tracking-wider">{activeClass.className} 累積評価一覧</h2>
+          </div>
+
+          {/* ★ 操作バーを枠外に出す */}
+          <div className="bg-white p-3 rounded-lg shadow-sm border border-slate-200 flex flex-col sm:flex-row justify-between items-center print-hidden gap-3">
+            <div className="flex items-center gap-3 flex-wrap">
+              <ClassSelector classes={appData.classes} activeClassId={activeClassId} setActiveClassId={setActiveClassId} />
+              
+              <div className="h-6 w-px bg-slate-200 hidden sm:block mx-1"></div>
+
+              <span className="text-xs text-slate-500 font-bold hidden md:inline ml-2"><i className="fa-solid fa-circle-info text-blue-400"></i> 各回のセルには出欠状況と観点別評価が表示されます。</span>
             </div>
-            <div className="flex gap-2">
-              <button onClick={exportCSV} className="bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 px-3 py-1.5 rounded text-sm font-bold transition-colors flex items-center gap-1.5">
+            <div className="flex gap-2 w-full sm:w-auto justify-end">
+              <button onClick={exportCSV} className="bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 px-3 py-1.5 rounded text-sm font-bold transition-colors flex items-center gap-1.5 shadow-sm">
                 <i className="fa-solid fa-file-csv"></i> 評価CSV出力
               </button>
-              <button onClick={() => window.print()} className="bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-300 px-3 py-1.5 rounded text-sm font-bold transition-colors flex items-center gap-1.5">
+              <button onClick={() => window.print()} className="bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-300 px-3 py-1.5 rounded text-sm font-bold transition-colors flex items-center gap-1.5 shadow-sm">
                 <i className="fa-solid fa-print"></i> 印刷
               </button>
             </div>
           </div>
 
-          <h2 className="hidden print:block text-lg font-bold mb-4 text-center">{activeClass.className} 累積評価一覧</h2>
+          <div className="bg-white p-4 rounded-lg shadow-sm border border-slate-200 print-expand">
+            {/* 印刷用のタイトル（画面上は見えない） */}
+            <h2 className="hidden print:block text-lg font-bold mb-4 text-center">{activeClass.className} 累積評価一覧（観点別）</h2>
 
-          <div className="overflow-x-auto print-expand pb-4">
-            <table className="w-max text-sm border-collapse border border-slate-300 table-fixed">
-              <thead className="bg-slate-100 text-slate-600 font-bold">
-                <tr>
-                  <th className="border border-slate-300 p-2 w-12 text-center shrink-0">番号</th>
-                  <th className="border border-slate-300 p-2 w-32 text-left shrink-0">氏名</th>
-                  {classLessons.map(l => (
-                    <th key={l.id} className="border border-slate-300 p-2 w-20 min-w-[80px] text-xs leading-tight text-center">
-                      第{l.count}回 <br/><span className="font-normal text-[10px] text-slate-500">{l.date ? String(l.date).substring(5).replace('-','/') : '-'}</span>
-                    </th>
-                  ))}
-                  <th className="border border-slate-300 p-2 w-16 bg-indigo-50 text-indigo-800 shrink-0 text-center">最終評価</th>
-                  <th className="border border-slate-300 p-2 w-12 bg-blue-50 text-blue-800 shrink-0 text-center">A</th>
-                  <th className="border border-slate-300 p-2 w-12 bg-emerald-50 text-emerald-800 shrink-0 text-center">B</th>
-                  <th className="border border-slate-300 p-2 w-12 bg-orange-50 text-orange-800 shrink-0 text-center">C</th>
-                </tr>
-              </thead>
-              <tbody>
-                {(activeClass.students || []).map(s => {
-                  let a=0, b=0, c=0;
-                  
-                  // 各回のセルレンダリング要素を構築しつつ、A/B/Cの数をカウント
-                  const cells = classLessons.map(l => {
-                    const data = getCellData(l.id, s.id);
-                    if (!data) return <td key={l.id} className="border border-slate-300 p-2 text-center text-slate-300 bg-white align-middle">-</td>;
+            <div className="overflow-x-auto print-expand pb-4">
+              <table className="w-max text-sm border-collapse border border-slate-300 table-fixed">
+                {/* ★ 背景色を白系統で統一し、太い罫線（border-r-2 border-r-slate-400）でセクションを区切る */}
+                <thead className="bg-slate-50 text-slate-600 font-bold">
+                  <tr>
+                    <th rowSpan={2} className="border border-slate-300 p-2 w-12 text-center align-middle shrink-0 text-sm">番号</th>
+                    <th rowSpan={2} className="border border-slate-300 p-2 w-40 text-center align-middle shrink-0 text-sm">氏名</th>
+                    <th rowSpan={2} className="border border-slate-300 border-r-2 border-r-slate-400 p-2 w-12 text-center align-middle shrink-0 text-sm">性別</th>
+                    {classLessons.map((l, index) => (
+                      <th key={l.id} rowSpan={2} className={`border border-slate-300 ${index === classLessons.length - 1 ? 'border-r-2 border-r-slate-400' : ''} p-1 w-20 min-w-[72px] text-sm leading-tight text-center align-middle`}>
+                        第{l.count}回 <br/><span className="font-normal text-[10px] text-slate-500">{l.date ? String(l.date).substring(5).replace('-','/') : '-'}</span>
+                      </th>
+                    ))}
+                    <th colSpan={3} className="border border-slate-300 border-r-2 border-r-slate-400 p-1.5 bg-slate-50 text-slate-700 shrink-0 text-center text-sm">最終評価</th>
+                    <th colSpan={3} className="border border-slate-300 border-r-2 border-r-slate-400 p-1.5 bg-slate-50 text-slate-700 shrink-0 text-center text-sm">累積(知)</th>
+                    <th colSpan={3} className="border border-slate-300 border-r-2 border-r-slate-400 p-1.5 bg-slate-50 text-slate-700 shrink-0 text-center text-sm">累積(思)</th>
+                    <th colSpan={3} className="border border-slate-300 p-1.5 bg-slate-50 text-slate-700 shrink-0 text-center text-sm">累積(主)</th>
+                  </tr>
+                  <tr>
+                    <th className="border border-slate-300 p-1 bg-slate-50 text-slate-700 text-xs w-8 text-center">知</th>
+                    <th className="border border-slate-300 p-1 bg-slate-50 text-slate-700 text-xs w-8 text-center">思</th>
+                    <th className="border border-slate-300 border-r-2 border-r-slate-400 p-1 bg-slate-50 text-slate-700 text-xs w-8 text-center">主</th>
                     
-                    if(data.eval==='A') a++; if(data.eval==='B') b++; if(data.eval==='C') c++;
+                    <th className="border border-slate-300 p-1 bg-slate-50 text-slate-700 text-xs w-7 text-center">A</th>
+                    <th className="border border-slate-300 p-1 bg-slate-50 text-slate-700 text-xs w-7 text-center">B</th>
+                    <th className="border border-slate-300 border-r-2 border-r-slate-400 p-1 bg-slate-50 text-slate-700 text-xs w-7 text-center">C</th>
                     
-                    const evalColorClass = data.eval === 'A' ? 'text-blue-600' : data.eval === 'B' ? 'text-emerald-600' : data.eval === 'C' ? 'text-orange-600' : 'text-slate-400';
-                    const attColorClass = data.attendance === '欠席' ? 'bg-red-100 text-red-700 border-red-200' : data.attendance === '未' ? 'bg-slate-100 text-slate-400 border-slate-200' : 'bg-slate-100 text-slate-600 border-slate-200';
-                    const isAbsent = data.attendance === '欠席';
+                    <th className="border border-slate-300 p-1 bg-slate-50 text-slate-700 text-xs w-7 text-center">A</th>
+                    <th className="border border-slate-300 p-1 bg-slate-50 text-slate-700 text-xs w-7 text-center">B</th>
+                    <th className="border border-slate-300 border-r-2 border-r-slate-400 p-1 bg-slate-50 text-slate-700 text-xs w-7 text-center">C</th>
+                    
+                    <th className="border border-slate-300 p-1 bg-slate-50 text-slate-700 text-xs w-7 text-center">A</th>
+                    <th className="border border-slate-300 p-1 bg-slate-50 text-slate-700 text-xs w-7 text-center">B</th>
+                    <th className="border border-slate-300 p-1 bg-slate-50 text-slate-700 text-xs w-7 text-center">C</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {(activeClass.students || []).map(s => {
+                    let kA=0, kB=0, kC=0, tA=0, tB=0, tC=0, aA=0, aB=0, aC=0;
+                    
+                    const cells = classLessons.map((l, index) => {
+                      const data = getCellData(l.id, s.id);
+                      const isLastCell = index === classLessons.length - 1;
+                      const borderRightClass = isLastCell ? 'border-r-2 border-r-slate-400' : '';
+
+                      if (!data) return <td key={l.id} className={`border border-slate-300 ${borderRightClass} p-1 text-center text-slate-300 bg-white align-middle`}>-</td>;
+                      
+                      if (data.attendance !== '欠席') {
+                        if(data.eval.k==='A') kA++; else if(data.eval.k==='B') kB++; else if(data.eval.k==='C') kC++;
+                        if(data.eval.t==='A') tA++; else if(data.eval.t==='B') tB++; else if(data.eval.t==='C') tC++;
+                        if(data.eval.a==='A') aA++; else if(data.eval.a==='B') aB++; else if(data.eval.a==='C') aC++;
+                      }
+                      
+                      const attColorClass = data.attendance === '欠席' ? 'bg-red-50 text-red-800 border-red-200' : 
+                                            data.attendance === '遅刻' ? 'bg-yellow-50 text-yellow-800 border-yellow-200' : 
+                                            data.attendance === '早退' ? 'bg-orange-50 text-orange-800 border-orange-200' : 
+                                            data.attendance === '保健室' ? 'bg-green-50 text-green-800 border-green-200' : 
+                                            data.attendance === 'その他' ? 'bg-slate-100 text-slate-700 border-slate-300' : 
+                                            data.attendance === '未' ? 'bg-slate-50 text-slate-400 border-slate-200 font-normal' : 
+                                            'bg-white text-slate-600 border-slate-200';
+                                            
+                      const isAbsent = data.attendance === '欠席';
+
+                      return (
+                        <td key={l.id} className={`border border-slate-300 ${borderRightClass} p-1.5 bg-white align-middle ${isAbsent ? 'bg-slate-50' : ''}`}>
+                          <div className="flex flex-col items-center justify-center gap-1">
+                            <span className={`px-1 rounded border text-[9px] font-bold leading-none w-full text-center py-0.5 ${attColorClass}`}>{data.attendance}</span>
+                            {!isAbsent && (
+                              <div className="flex gap-1 text-[10px] font-bold leading-none mt-0.5">
+                                 <div className="flex flex-col items-center"><span className="text-[8px] text-slate-400 font-normal">知</span><span className={evalColorText(data.eval.k)}>{data.eval.k || '-'}</span></div>
+                                 <div className="flex flex-col items-center"><span className="text-[8px] text-slate-400 font-normal">思</span><span className={evalColorText(data.eval.t)}>{data.eval.t || '-'}</span></div>
+                                 <div className="flex flex-col items-center"><span className="text-[8px] text-slate-400 font-normal">主</span><span className={evalColorText(data.eval.a)}>{data.eval.a || '-'}</span></div>
+                              </div>
+                            )}
+                          </div>
+                        </td>
+                      )
+                    });
+
+                    const calcFinal = (a, b, c) => {
+                      const total = a + b + c;
+                      if(total === 0) return "";
+                      const avg = (a*3 + b*2 + c*1) / total;
+                      if (avg >= 2.5) return "A";
+                      if (avg >= 1.5) return "B";
+                      return "C";
+                    };
+
+                    const finalK = calcFinal(kA, kB, kC);
+                    const finalT = calcFinal(tA, tB, tC);
+                    const finalA = calcFinal(aA, aB, aC);
 
                     return (
-                      <td key={l.id} className={`border border-slate-300 p-1.5 bg-white align-middle ${isAbsent ? 'bg-slate-50' : ''}`}>
-                        <div className="flex flex-col items-center justify-center gap-1.5">
-                          <span className={`px-1.5 py-0.5 rounded border text-[10px] font-bold leading-none ${attColorClass}`}>{data.attendance}</span>
-                          <span className={`font-bold text-sm leading-none ${evalColorClass}`}>{data.eval || '-'}</span>
-                        </div>
-                      </td>
-                    )
-                  });
-
-                  // 最終評価の自動算出 (A=3点, B=2点, C=1点 の平均値から算出)
-                  let finalEval = "";
-                  const totalEvalCount = a + b + c;
-                  if (totalEvalCount > 0) {
-                    const avg = (a * 3 + b * 2 + c * 1) / totalEvalCount;
-                    if (avg >= 2.5) finalEval = "A";
-                    else if (avg >= 1.5) finalEval = "B";
-                    else finalEval = "C";
-                  }
-
-                  const finalEvalColor = finalEval === 'A' ? 'text-blue-700 bg-blue-50/50' : finalEval === 'B' ? 'text-emerald-700 bg-emerald-50/50' : finalEval === 'C' ? 'text-orange-700 bg-orange-50/50' : 'text-slate-400 bg-slate-50';
-
-                  return (
-                    <tr key={s.id} className="hover:bg-slate-50 border-b border-slate-200">
-                      <td className="border border-slate-300 p-2 text-center text-slate-500 font-bold align-middle">{s.number}</td>
-                      <td className="border border-slate-300 p-2 text-left bg-white align-middle">
-                        <div className="flex flex-col">
-                          <div className="flex items-center gap-1.5">
-                            <span className="font-bold text-slate-700 text-sm whitespace-nowrap">{s.name}</span>
-                            {s.status !== "在籍" && <span className="text-[9px] bg-red-100 text-red-700 px-1 py-0.5 rounded font-bold border border-red-200 leading-none">{s.status}</span>}
+                      <tr key={s.id} className="hover:bg-slate-50 border-b border-slate-200 bg-white">
+                        <td className="border border-slate-300 p-2 text-center text-slate-500 font-bold align-top bg-white">{s.number}</td>
+                        <td className="border border-slate-300 p-2 text-left bg-white align-top">
+                          <div className="flex flex-col">
+                            <div className="flex items-center gap-1.5">
+                              <span className="font-bold text-slate-700 text-sm whitespace-nowrap">{s.name}</span>
+                              {s.status !== "在籍" && <span className="text-[9px] bg-red-100 text-red-700 px-1 py-0.5 rounded font-bold border border-red-200 leading-none">{s.status}</span>}
+                            </div>
+                            <span className="text-[10px] text-slate-400 font-normal mt-0.5 whitespace-nowrap">{s.furigana}</span>
                           </div>
-                          <span className="text-[10px] text-slate-400 font-normal mt-0.5 whitespace-nowrap">{s.furigana}</span>
-                        </div>
-                      </td>
-                      {cells}
-                      <td className={`border border-slate-300 p-1 font-bold text-center align-middle text-sm ${finalEvalColor}`}>{finalEval}</td>
-                      <td className="border border-slate-300 p-1 bg-blue-50/30 font-bold text-blue-800 text-center align-middle">{a || ''}</td>
-                      <td className="border border-slate-300 p-1 bg-emerald-50/30 font-bold text-emerald-800 text-center align-middle">{b || ''}</td>
-                      <td className="border border-slate-300 p-1 bg-orange-50/30 font-bold text-orange-800 text-center align-middle">{c || ''}</td>
-                    </tr>
-                  )
-                })}
-              </tbody>
-            </table>
+                        </td>
+                        <td className="border border-slate-300 border-r-2 border-r-slate-400 p-2 text-center text-slate-600 text-sm align-top bg-white">{s.gender}</td>
+                        
+                        {cells}
+
+                        <td className={`border border-slate-300 p-1 font-bold text-center align-middle text-sm ${evalColorText(finalK)} bg-white`}>{finalK}</td>
+                        <td className={`border border-slate-300 p-1 font-bold text-center align-middle text-sm ${evalColorText(finalT)} bg-white`}>{finalT}</td>
+                        <td className={`border border-slate-300 border-r-2 border-r-slate-400 p-1 font-bold text-center align-middle text-sm ${evalColorText(finalA)} bg-white`}>{finalA}</td>
+                        
+                        <td className="border border-slate-300 p-1 bg-white font-bold text-blue-800 text-center align-middle text-sm">{kA || ''}</td>
+                        <td className="border border-slate-300 p-1 bg-white font-bold text-emerald-800 text-center align-middle text-sm">{kB || ''}</td>
+                        <td className="border border-slate-300 border-r-2 border-r-slate-400 p-1 bg-white font-bold text-orange-800 text-center align-middle text-sm">{kC || ''}</td>
+                        
+                        <td className="border border-slate-300 p-1 bg-white font-bold text-blue-800 text-center align-middle text-sm">{tA || ''}</td>
+                        <td className="border border-slate-300 p-1 bg-white font-bold text-emerald-800 text-center align-middle text-sm">{tB || ''}</td>
+                        <td className="border border-slate-300 border-r-2 border-r-slate-400 p-1 bg-white font-bold text-orange-800 text-center align-middle text-sm">{tC || ''}</td>
+                        
+                        <td className="border border-slate-300 p-1 bg-white font-bold text-blue-800 text-center align-middle text-sm">{aA || ''}</td>
+                        <td className="border border-slate-300 p-1 bg-white font-bold text-emerald-800 text-center align-middle text-sm">{aB || ''}</td>
+                        <td className="border border-slate-300 p-1 bg-white font-bold text-orange-800 text-center align-middle text-sm">{aC || ''}</td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+            </div>
           </div>
         </div>
       );
@@ -1086,7 +1324,7 @@ ${JSON.stringify(targetData, null, 2)}
       };
 
       return (
-        <div className="max-w-4xl mx-auto space-y-4">
+        <div className="max-w-6xl mx-auto space-y-4">
           <div className="bg-white p-6 rounded-lg shadow-sm border border-slate-200">
             <h2 className="text-lg font-bold mb-4 text-slate-700 flex items-center gap-2">
               <i className="fa-solid fa-scale-balanced text-indigo-500"></i> AI評価基準（ルーブリック）の設定
@@ -1100,13 +1338,44 @@ ${JSON.stringify(targetData, null, 2)}
               ))}
             </div>
 
-            <p className="text-xs text-slate-500 mb-2 font-bold"><i className="fa-solid fa-lightbulb text-amber-500"></i> Gemini APIに送信されるプロンプトの一部として使用されます。観点やA/B/Cの条件を具体的に記述してください。</p>
+            <p className="text-xs text-slate-500 mb-3 font-bold"><i className="fa-solid fa-lightbulb text-amber-500"></i> 各観点ごとに、Gemini APIに送信される判定条件を記述してください。</p>
             
-            <textarea
-              value={rubricText}
-              onChange={e => setRubricText(e.target.value)}
-              className="w-full h-80 border border-slate-300 rounded p-3 text-sm focus:ring-2 focus:ring-indigo-500 font-mono leading-relaxed"
-            />
+            <div className="overflow-x-auto">
+              <table className="w-full border-collapse border border-slate-300 shadow-sm rounded-lg overflow-hidden">
+                <thead className="bg-indigo-50 text-indigo-900 text-sm">
+                  <tr>
+                    <th className="border border-slate-300 p-3 w-1/3 text-center"><i className="fa-solid fa-book mr-1 text-indigo-500"></i> 知識・技能 (知)</th>
+                    <th className="border border-slate-300 p-3 w-1/3 text-center"><i className="fa-solid fa-brain mr-1 text-indigo-500"></i> 思考・判断・表現 (思)</th>
+                    <th className="border border-slate-300 p-3 w-1/3 text-center"><i className="fa-solid fa-user-check mr-1 text-indigo-500"></i> 主体的に学習に取り組む態度 (主)</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td className="border border-slate-300 p-2 bg-white align-top">
+                      <textarea
+                        value={rubricText.knowledge}
+                        onChange={e => setRubricText({...rubricText, knowledge: e.target.value})}
+                        className="w-full h-72 border-none p-2 text-sm focus:ring-2 focus:ring-indigo-500 font-mono leading-relaxed outline-none resize-none"
+                      />
+                    </td>
+                    <td className="border border-slate-300 p-2 bg-white align-top">
+                      <textarea
+                        value={rubricText.thinking}
+                        onChange={e => setRubricText({...rubricText, thinking: e.target.value})}
+                        className="w-full h-72 border-none p-2 text-sm focus:ring-2 focus:ring-indigo-500 font-mono leading-relaxed outline-none resize-none"
+                      />
+                    </td>
+                    <td className="border border-slate-300 p-2 bg-white align-top">
+                      <textarea
+                        value={rubricText.attitude}
+                        onChange={e => setRubricText({...rubricText, attitude: e.target.value})}
+                        className="w-full h-72 border-none p-2 text-sm focus:ring-2 focus:ring-indigo-500 font-mono leading-relaxed outline-none resize-none"
+                      />
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
             
             <div className="flex justify-end mt-4">
               <button onClick={saveRubric} className="bg-indigo-600 hover:bg-indigo-700 text-white px-6 py-2 rounded font-bold shadow-sm flex items-center gap-2">
@@ -1229,13 +1498,12 @@ ${JSON.stringify(targetData, null, 2)}
           </div>
 
           <div className="bg-white p-6 rounded-lg shadow-sm border border-slate-200">
-            <div className="flex justify-between items-center mb-4 border-b pb-2">
-              <select value={activeClassId} onChange={e => setActiveClassId(e.target.value)} className="border rounded p-1.5 font-bold text-sm bg-slate-50">
-                {appData.classes.map(c => <option key={c.classId} value={c.classId}>{c.className}</option>)}
-              </select>
-              <div className="flex gap-2">
-                <button onClick={() => setBulkImport({ show: true, text: '' })} className="bg-indigo-50 text-indigo-700 border border-indigo-200 hover:bg-indigo-100 px-3 py-1.5 rounded text-sm font-bold flex items-center gap-1"><i className="fa-solid fa-file-import"></i> 一括追加</button>
-                <button onClick={addStudent} className="bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-emerald-100 px-3 py-1.5 rounded text-sm font-bold flex items-center gap-1"><i className="fa-solid fa-plus"></i> 1名追加</button>
+            <div className="flex flex-col sm:flex-row justify-between items-center mb-4 border-b pb-3 gap-3">
+              <ClassSelector classes={appData.classes} activeClassId={activeClassId} setActiveClassId={setActiveClassId} />
+              
+              <div className="flex gap-2 w-full sm:w-auto justify-end">
+                <button onClick={() => setBulkImport({ show: true, text: '' })} className="bg-indigo-50 text-indigo-700 border border-indigo-200 hover:bg-indigo-100 px-3 py-1.5 rounded text-sm font-bold flex items-center gap-1 shadow-sm"><i className="fa-solid fa-file-import"></i> 一括追加</button>
+                <button onClick={addStudent} className="bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-emerald-100 px-3 py-1.5 rounded text-sm font-bold flex items-center gap-1 shadow-sm"><i className="fa-solid fa-plus"></i> 1名追加</button>
               </div>
             </div>
 
@@ -1244,12 +1512,12 @@ ${JSON.stringify(targetData, null, 2)}
                 <table className="w-full text-sm whitespace-nowrap">
                   <thead className="bg-slate-100 text-slate-600">
                     <tr>
-                      <th className="p-2 w-16">番号</th>
-                      <th className="p-2">名前</th>
-                      <th className="p-2">ふりがな</th>
-                      <th className="p-2 w-20">性別</th>
-                      <th className="p-2 w-24">状態</th>
-                      <th className="p-2 w-16">削除</th>
+                      <th className="p-2 w-16 text-center">番号</th>
+                      <th className="p-2 text-center">名前</th>
+                      <th className="p-2 text-center">ふりがな</th>
+                      <th className="p-2 w-20 text-center">性別</th>
+                      <th className="p-2 w-24 text-center">状態</th>
+                      <th className="p-2 w-16 text-center">削除</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -1259,12 +1527,12 @@ ${JSON.stringify(targetData, null, 2)}
                         <td className="p-1"><input type="text" value={s.name} onChange={e => handleStudentChange(s.id, 'name', e.target.value)} className={`w-full border rounded p-1 ${s.status!=='在籍'?'text-slate-400':''}`} /></td>
                         <td className="p-1"><input type="text" value={s.furigana || ""} onChange={e => handleStudentChange(s.id, 'furigana', e.target.value)} className={`w-full border rounded p-1 ${s.status!=='在籍'?'text-slate-400':''}`} /></td>
                         <td className="p-1">
-                          <select value={s.gender || "その他"} onChange={e => handleStudentChange(s.id, 'gender', e.target.value)} className="w-full border rounded p-1 font-bold">
+                          <select value={s.gender || "その他"} onChange={e => handleStudentChange(s.id, 'gender', e.target.value)} className="w-full border rounded p-1 font-bold text-center">
                             <option value="男">男</option><option value="女">女</option><option value="その他">その他</option>
                           </select>
                         </td>
                         <td className="p-1">
-                          <select value={s.status} onChange={e => handleStudentChange(s.id, 'status', e.target.value)} className="w-full border rounded p-1 font-bold">
+                          <select value={s.status} onChange={e => handleStudentChange(s.id, 'status', e.target.value)} className="w-full border rounded p-1 font-bold text-center">
                             <option value="在籍">在籍</option><option value="転出">転出</option><option value="休学">休学</option>
                           </select>
                         </td>
