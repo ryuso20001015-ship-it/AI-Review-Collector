@@ -348,7 +348,7 @@ ${JSON.stringify(targetData, null, 2)}
       }, [activeClassId]);
 
       return (
-        <div className="flex items-center gap-2 flex-wrap pb-1">
+        <div className="flex items-center gap-2 flex-wrap">
           <div className="flex gap-1 flex-wrap">
             {[1, 2, 3].map(g => {
               const hasClasses = classes.some(c => c.classId.startsWith(`${g}-`));
@@ -673,6 +673,22 @@ ${JSON.stringify(targetData, null, 2)}
         }
       };
 
+      // ★ 貼り付けボタン押下時のチェック処理
+      const handlePasteButtonClick = () => {
+        // 出欠が「未」のままの生徒がいるかチェック
+        const hasUnsetAttendance = activeClass.students.some(s => {
+          const rev = getReview(s.id);
+          return rev.attendance === "未" && s.status === "在籍";
+        });
+        
+        if (hasUnsetAttendance) {
+          if (!window.confirm("出欠情報が未反映の生徒がいます。\n欠席者が反映されていないと、コメントの貼り付け行がズレる可能性があります。\n\nこのまま貼り付けを続行しますか？\n（先に「出欠反映」を行うことをお勧めします）")) {
+            return; // キャンセルした場合は中断
+          }
+        }
+        setIsPasteMode(true);
+      };
+
       const handleApplyPaste = () => {
         if (!activeLesson || !pasteText.trim()) return;
         const lines = pasteText.split('\n').map(l => l.trim()).filter(l => l !== "");
@@ -700,6 +716,7 @@ ${JSON.stringify(targetData, null, 2)}
         showToast("テキストを反映しました。", "success");
       };
 
+      // ★ AI評価開始時の未評価ゼロチェック＆再評価処理
       const runAIEvaluation = async () => {
         if (!appData.settings.geminiApiKey) return showToast("設定画面からGemini APIキーを登録してください。", "error");
         if (!activeLesson) return;
@@ -708,13 +725,28 @@ ${JSON.stringify(targetData, null, 2)}
         const rubrics = appData.rubrics || {};
         const rubric = rubrics[grade] || DEFAULT_RUBRIC;
 
-        const targetStudents = activeClass.students.filter(s => {
+        let targetStudents = activeClass.students.filter(s => {
           const rev = getReview(s.id);
           const notEvaluated = !rev.aiEval || !rev.aiEval.k || !rev.aiEval.t || !rev.aiEval.a;
           return rev.text && notEvaluated && rev.attendance !== "欠席";
         });
 
-        if (targetStudents.length === 0) return showToast("未評価のテキストがありません。", "info");
+        if (targetStudents.length === 0) {
+          const allStudentsWithText = activeClass.students.filter(s => {
+            const rev = getReview(s.id);
+            return rev.text && rev.attendance !== "欠席";
+          });
+          
+          if (allStudentsWithText.length === 0) {
+            return showToast("評価する振り返りテキストがありません。", "info");
+          }
+          
+          if (window.confirm("未評価のテキストがありません。入力済みのすべてのテキストを再評価しますか？")) {
+            targetStudents = allStudentsWithText;
+          } else {
+            return;
+          }
+        }
 
         setIsEvaluating(true);
         try {
@@ -806,29 +838,45 @@ ${JSON.stringify(targetData, null, 2)}
             <h2 className="text-xl sm:text-2xl font-bold text-slate-700 text-center tracking-wider">{activeClass.className} 授業別評価</h2>
           </div>
 
-          <div className="bg-white p-3 rounded-lg shadow-sm border border-slate-200 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          {/* ★ クラス選択と授業選択を同じUIで縦に配置 */}
+          <div className="bg-white p-4 rounded-lg shadow-sm border border-slate-200 flex flex-col gap-3">
             <div className="flex items-center gap-2 flex-wrap">
+              <span className="text-xs font-bold text-slate-500 mr-1 w-12 text-right"><i className="fa-solid fa-users mr-1"></i>クラス:</span>
               <ClassSelector classes={appData.classes} activeClassId={activeClassId} setActiveClassId={setActiveClassId} />
+            </div>
+            
+            <div className="flex items-center gap-2 flex-wrap border-t border-slate-100 pt-3">
+              <span className="text-xs font-bold text-slate-500 mr-1 w-12 text-right"><i className="fa-solid fa-chalkboard-user mr-1"></i>授業:</span>
+              {classLessons.length > 0 ? (
+                <div className="flex gap-1 flex-wrap">
+                  {classLessons.map(l => (
+                    <button
+                      key={l.id}
+                      onClick={() => setActiveLessonId(l.id)}
+                      className={`px-3 py-1.5 rounded text-sm font-bold transition-colors border ${
+                        activeLessonId === l.id
+                          ? 'bg-blue-600 text-white border-blue-600 shadow-sm'
+                          : 'bg-white text-slate-600 border-slate-300 hover:bg-slate-50'
+                      }`}
+                    >
+                      {l.title}
+                    </button>
+                  ))}
+                </div>
+              ) : (
+                <span className="text-sm text-slate-400 font-bold ml-1">授業なし</span>
+              )}
               
-              <div className="h-6 w-px bg-slate-200 hidden sm:block mx-1"></div>
+              <div className="h-6 w-px bg-slate-200 hidden sm:block mx-2"></div>
               
-              <div className="flex items-center gap-2 flex-wrap sm:ml-1">
-                {classLessons.length > 0 ? (
-                  <select value={activeLessonId} onChange={e => setActiveLessonId(e.target.value)} className="border border-slate-300 rounded p-1.5 text-sm font-bold bg-slate-50 text-slate-700 outline-none focus:ring-2 focus:ring-blue-500">
-                    {classLessons.map(l => <option key={l.id} value={l.id}>{l.title} ({l.date})</option>)}
-                  </select>
-                ) : (
-                  <span className="text-sm text-slate-400 font-bold ml-1">授業なし</span>
-                )}
-                <button onClick={addLesson} className="text-sm bg-slate-100 hover:bg-slate-200 text-slate-600 px-3 py-1.5 rounded font-bold border border-slate-300 transition-colors shadow-sm">
-                  <i className="fa-solid fa-plus"></i> 授業追加
+              <button onClick={addLesson} className="text-sm bg-slate-100 hover:bg-slate-200 text-slate-600 px-3 py-1.5 rounded font-bold border border-slate-300 transition-colors shadow-sm">
+                <i className="fa-solid fa-plus"></i> 追加
+              </button>
+              {activeLesson && (
+                <button onClick={deleteLesson} className="text-sm bg-red-50 hover:bg-red-100 text-red-600 px-3 py-1.5 rounded font-bold border border-red-200 transition-colors shadow-sm">
+                  <i className="fa-solid fa-trash"></i> 削除
                 </button>
-                {activeLesson && (
-                  <button onClick={deleteLesson} className="text-sm bg-red-50 hover:bg-red-100 text-red-600 px-3 py-1.5 rounded font-bold border border-red-200 transition-colors shadow-sm ml-1">
-                    <i className="fa-solid fa-trash"></i> 削除
-                  </button>
-                )}
-              </div>
+              )}
             </div>
           </div>
 
@@ -847,8 +895,9 @@ ${JSON.stringify(targetData, null, 2)}
                   <button onClick={syncAttendanceFromCloud} className="bg-amber-100 hover:bg-amber-200 text-amber-800 border border-amber-300 px-3 py-2 rounded text-sm font-bold transition-colors flex items-center gap-1.5 shadow-sm">
                     <i className="fa-solid fa-sync"></i> 出欠反映
                   </button>
-                  <button onClick={() => setIsPasteMode(true)} className="bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 px-3 py-2 rounded text-sm font-bold transition-colors flex items-center gap-1.5 shadow-sm">
-                    <i className="fa-solid fa-paste"></i> テキスト流し込み
+                  {/* ★ ボタンテキスト変更と独自ハンドラ紐付け */}
+                  <button onClick={handlePasteButtonClick} className="bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 px-3 py-2 rounded text-sm font-bold transition-colors flex items-center gap-1.5 shadow-sm">
+                    <i className="fa-solid fa-paste"></i> 振り返りコメント貼り付け
                   </button>
                 </div>
               </div>
@@ -1015,7 +1064,7 @@ ${JSON.stringify(targetData, null, 2)}
             <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
               <div className="bg-white rounded-lg shadow-xl w-full max-w-2xl overflow-hidden flex flex-col max-h-[90vh]">
                 <div className="bg-indigo-800 text-white px-4 py-3 font-bold flex justify-between items-center">
-                  <span><i className="fa-solid fa-paste mr-2"></i>振り返りテキストの流し込み</span>
+                  <span><i className="fa-solid fa-paste mr-2"></i>振り返りコメント貼り付け</span>
                   <button onClick={() => setIsPasteMode(false)} className="text-white hover:text-gray-300">
                     <i className="fa-solid fa-times text-lg"></i>
                   </button>
@@ -1143,7 +1192,6 @@ ${JSON.stringify(targetData, null, 2)}
             <h2 className="text-xl sm:text-2xl font-bold text-slate-700 text-center tracking-wider">{activeClass.className} 累積評価一覧</h2>
           </div>
 
-          {/* ★ 操作バーを枠外に出す */}
           <div className="bg-white p-3 rounded-lg shadow-sm border border-slate-200 flex flex-col sm:flex-row justify-between items-center print-hidden gap-3">
             <div className="flex items-center gap-3 flex-wrap">
               <ClassSelector classes={appData.classes} activeClassId={activeClassId} setActiveClassId={setActiveClassId} />
@@ -1168,7 +1216,6 @@ ${JSON.stringify(targetData, null, 2)}
 
             <div className="overflow-x-auto print-expand pb-4">
               <table className="w-max text-sm border-collapse border border-slate-300 table-fixed">
-                {/* ★ 背景色を白系統で統一し、太い罫線（border-r-2 border-r-slate-400）でセクションを区切る */}
                 <thead className="bg-slate-50 text-slate-600 font-bold">
                   <tr>
                     <th rowSpan={2} className="border border-slate-300 p-2 w-12 text-center align-middle shrink-0 text-sm">番号</th>
@@ -1234,10 +1281,11 @@ ${JSON.stringify(targetData, null, 2)}
                           <div className="flex flex-col items-center justify-center gap-1">
                             <span className={`px-1 rounded border text-[9px] font-bold leading-none w-full text-center py-0.5 ${attColorClass}`}>{data.attendance}</span>
                             {!isAbsent && (
-                              <div className="flex gap-1 text-[10px] font-bold leading-none mt-0.5">
-                                 <div className="flex flex-col items-center"><span className="text-[8px] text-slate-400 font-normal">知</span><span className={evalColorText(data.eval.k)}>{data.eval.k || '-'}</span></div>
-                                 <div className="flex flex-col items-center"><span className="text-[8px] text-slate-400 font-normal">思</span><span className={evalColorText(data.eval.t)}>{data.eval.t || '-'}</span></div>
-                                 <div className="flex flex-col items-center"><span className="text-[8px] text-slate-400 font-normal">主</span><span className={evalColorText(data.eval.a)}>{data.eval.a || '-'}</span></div>
+                              // ★「知・思・主」の文字を削除し、結果のみを並べる
+                              <div className="flex gap-1.5 text-sm font-bold leading-none mt-1 justify-center tracking-widest">
+                                 <span className={evalColorText(data.eval.k)}>{data.eval.k || '-'}</span>
+                                 <span className={evalColorText(data.eval.t)}>{data.eval.t || '-'}</span>
+                                 <span className={evalColorText(data.eval.a)}>{data.eval.a || '-'}</span>
                               </div>
                             )}
                           </div>
