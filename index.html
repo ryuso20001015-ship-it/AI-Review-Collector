@@ -54,6 +54,17 @@
     ::-webkit-scrollbar-track { background: transparent; }
     ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 3px; }
     ::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+    
+    /* 進捗ゲージ用のアニメーション */
+    @keyframes progress-bar {
+      0% { width: 0%; }
+      20% { width: 40%; }
+      60% { width: 75%; }
+      100% { width: 95%; } /* API完了時に強制的に消えるため95%止め */
+    }
+    .animate-progress-bar {
+      animation: progress-bar 10s cubic-bezier(0.1, 0, 0.2, 1) forwards;
+    }
   </style>
 </head>
 <body class="bg-slate-50 text-slate-800 font-sans min-h-screen">
@@ -69,7 +80,7 @@
     const { useState, useEffect, useRef } = React;
 
     // ==========================================
-    // エラーバウンダリ（画面が真っ白になるのを防ぐ）
+    // エラーバウンダリ
     // ==========================================
     class ErrorBoundary extends React.Component {
       constructor(props) {
@@ -154,7 +165,6 @@
       reviews: {}  
     };
 
-    // データの欠落を完全に補完・修復する関数
     const sanitizeAppData = (parsed) => {
       if (!parsed || typeof parsed !== 'object') return DEFAULT_DATA;
       return {
@@ -244,16 +254,16 @@ ${JSON.stringify(targetData)}
       return JSON.parse(textResponse);
     };
 
-    // クラス全体の振り返りを分析するAPI関数
+    // クラス全体の振り返りを分析するAPI関数（プロンプト簡潔化）
     const callGeminiOverallAnalysisAPI = async (apiKey, targetData) => {
       const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`;
-      const prompt = `あなたは中学校のベテラン教員です。以下の生徒たちの「授業の振り返り」を分析し、クラス全体の理解度の傾向と、次回の授業に向けた教員への具体的なアドバイス（指導の改善点や補足すべき内容など）をまとめてください。
+      const prompt = `あなたは中学校のベテラン教員です。以下の生徒たちの「授業の振り返り」を分析し、クラス全体の傾向を簡潔にまとめてください。
 
 【生徒の振り返りテキスト（抜粋）】
 ${JSON.stringify(targetData, null, 2)}
 
 【出力形式】
-以下の要素を含め、Markdown形式（見出しや箇条書き）で簡潔かつ読みやすく記述してください。
+以下の要素を含め、Markdown形式（箇条書き）で**非常に簡潔に（各項目2〜3文程度）**記述してください。長文は避け、要点のみをまとめてください。
 1. クラス全体の理解度と傾向
 2. 共通して見られるつまずきや疑問点
 3. 次回の授業に向けたアドバイス`;
@@ -528,18 +538,16 @@ ${JSON.stringify(targetData, null, 2)}
             activeClass.students.forEach(s => {
               const attClass = attData.classes.find(c => c.classId === activeClassId);
               if (attClass) {
-                // 名前でマッチング（出欠アプリとの互換性維持）
                 const attStudent = attClass.students.find(st => st.name === s.name);
                 if (attStudent) {
                   const attRecord = attData.attendances[`${attLessonId}_${attStudent.id}`];
                   
-                  // 出欠状況のマッピング処理（出欠アプリで特に指定がない＝出席とみなす）
                   let status = "出席";
                   if (attRecord && attRecord.status) {
                     if (attRecord.status === "保健室" || attRecord.status === "その他") {
                       status = "他";
                     } else {
-                      status = attRecord.status; // 欠席, 遅刻, 早退
+                      status = attRecord.status;
                     }
                   }
                   
@@ -738,10 +746,20 @@ ${JSON.stringify(targetData, null, 2)}
                     <span className="text-xs font-bold text-slate-500">
                       入力済み: {activeClass.students.filter(s => getReview(s.id).text).length} 名
                     </span>
-                    <button onClick={runOverallAnalysis} disabled={isAnalyzing} className="bg-white border border-blue-300 text-blue-700 hover:bg-blue-50 px-3 py-1.5 rounded text-xs font-bold transition-colors flex items-center gap-1.5 shadow-sm">
-                      {isAnalyzing ? <i className="fa-solid fa-spinner fa-spin"></i> : <i className="fa-solid fa-lightbulb text-amber-500"></i>}
-                      {isAnalyzing ? "分析中..." : "振り返りからクラス全体を分析"}
-                    </button>
+                    <div className="flex flex-col items-end w-48 relative">
+                      <button onClick={runOverallAnalysis} disabled={isAnalyzing} className="bg-white border border-blue-300 text-blue-700 hover:bg-blue-50 px-3 py-1.5 rounded text-xs font-bold transition-colors flex items-center gap-1.5 shadow-sm w-full justify-center">
+                        {isAnalyzing ? <i className="fa-solid fa-spinner fa-spin"></i> : <i className="fa-solid fa-lightbulb text-amber-500"></i>}
+                        {isAnalyzing ? "AI分析中..." : "振り返りからクラス全体を分析"}
+                      </button>
+                      {/* 分析進捗ゲージ */}
+                      {isAnalyzing && (
+                        <div className="absolute top-full mt-1 w-full">
+                          <div className="w-full bg-slate-200 rounded-full h-1 overflow-hidden shadow-inner">
+                            <div className="bg-blue-400 h-1 rounded-full animate-progress-bar"></div>
+                          </div>
+                        </div>
+                      )}
+                    </div>
                   </div>
                 </div>
                 {activeLesson.overallAnalysis ? (
@@ -757,10 +775,23 @@ ${JSON.stringify(targetData, null, 2)}
 
               <div className="flex justify-between items-center mb-3">
                 <h3 className="font-bold text-slate-700 flex items-center gap-2"><i className="fa-solid fa-list-check"></i> 個別評価リスト</h3>
-                <button onClick={runAIEvaluation} disabled={isEvaluating} className="bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 text-white px-4 py-2 rounded text-sm font-bold transition-colors flex items-center gap-2 shadow-sm">
-                  {isEvaluating ? <i className="fa-solid fa-spinner fa-spin"></i> : <i className="fa-solid fa-wand-magic-sparkles"></i>}
-                  未評価をAIで判定
-                </button>
+                <div className="flex flex-col items-end w-48 relative">
+                  <button onClick={runAIEvaluation} disabled={isEvaluating} className="bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 text-white px-4 py-2 rounded text-sm font-bold transition-colors flex items-center gap-2 shadow-sm w-full justify-center">
+                    {isEvaluating ? <i className="fa-solid fa-spinner fa-spin"></i> : <i className="fa-solid fa-wand-magic-sparkles"></i>}
+                    未評価をAIで判定
+                  </button>
+                  {/* 評価進捗ゲージ */}
+                  {isEvaluating && (
+                    <div className="absolute top-full mt-1 w-full">
+                      <div className="flex justify-between text-[9px] text-blue-600 font-bold mb-0.5 px-1">
+                        <span>AIと通信中...</span>
+                      </div>
+                      <div className="w-full bg-slate-200 rounded-full h-1.5 overflow-hidden shadow-inner">
+                        <div className="bg-blue-500 h-1.5 rounded-full animate-progress-bar"></div>
+                      </div>
+                    </div>
+                  )}
+                </div>
               </div>
 
               <div className="overflow-x-auto border border-slate-200 rounded-lg">
@@ -884,13 +915,16 @@ ${JSON.stringify(targetData, null, 2)}
       const activeClass = appData.classes.find(c => c.classId === activeClassId);
       const classLessons = (appData.lessons || []).filter(l => l.classId === activeClassId).sort((a,b)=>a.count - b.count);
 
-      const getFinalEval = (lessonId, studentId) => {
+      // セルに表示する全情報（出欠・テキスト・評価）を取得するヘルパー関数
+      const getCellData = (lessonId, studentId) => {
         const reviews = appData.reviews || {};
         const rev = reviews[`${lessonId}_${studentId}`];
-        if (!rev) return "";
-        if (rev.attendance === "欠席") return "欠";
-        if (rev.attendance === "未") return "";
-        return rev.manualEval || rev.aiEval || "";
+        if (!rev) return null;
+        return {
+          attendance: rev.attendance,
+          text: rev.text,
+          eval: rev.manualEval || rev.aiEval || ""
+        };
       };
 
       const exportCSV = () => {
@@ -902,8 +936,10 @@ ${JSON.stringify(targetData, null, 2)}
           let row = [s.number, s.name, s.furigana || '', s.gender || ''];
           let a=0, b=0, c=0;
           classLessons.forEach(l => {
-            const ev = getFinalEval(l.id, s.id);
-            row.push(ev);
+            const data = getCellData(l.id, s.id);
+            const ev = data ? data.eval : "";
+            // Excel等での成績処理連携を考慮し、CSVには出欠やテキストは含めず「評価値」のみ出力します。
+            row.push(data && data.attendance === '欠席' ? '欠' : ev);
             if(ev==='A') a++; if(ev==='B') b++; if(ev==='C') c++;
           });
           row.push(a, b, c);
@@ -923,12 +959,15 @@ ${JSON.stringify(targetData, null, 2)}
       return (
         <div className="bg-white p-4 rounded-lg shadow-sm border border-slate-200 print-expand">
           <div className="flex justify-between items-center mb-4 print-hidden border-b pb-3">
-            <select value={activeClassId} onChange={e => setActiveClassId(e.target.value)} className="border border-slate-300 rounded p-1.5 text-sm font-bold bg-slate-50 text-slate-700 outline-none focus:ring-2 focus:ring-blue-500">
-              {appData.classes.map(c => <option key={c.classId} value={c.classId}>{c.className}</option>)}
-            </select>
+            <div className="flex items-center gap-3">
+              <select value={activeClassId} onChange={e => setActiveClassId(e.target.value)} className="border border-slate-300 rounded p-1.5 text-sm font-bold bg-slate-50 text-slate-700 outline-none focus:ring-2 focus:ring-blue-500">
+                {appData.classes.map(c => <option key={c.classId} value={c.classId}>{c.className}</option>)}
+              </select>
+              <span className="text-xs text-slate-500 font-bold hidden sm:inline"><i className="fa-solid fa-circle-info text-blue-400"></i> 各回のセルには出欠状況と振り返りテキストが表示されます。</span>
+            </div>
             <div className="flex gap-2">
               <button onClick={exportCSV} className="bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 px-3 py-1.5 rounded text-sm font-bold transition-colors flex items-center gap-1.5">
-                <i className="fa-solid fa-file-csv"></i> CSV出力
+                <i className="fa-solid fa-file-csv"></i> 評価CSV出力
               </button>
               <button onClick={() => window.print()} className="bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-300 px-3 py-1.5 rounded text-sm font-bold transition-colors flex items-center gap-1.5">
                 <i className="fa-solid fa-print"></i> 印刷
@@ -939,20 +978,19 @@ ${JSON.stringify(targetData, null, 2)}
           <h2 className="hidden print:block text-lg font-bold mb-4 text-center">{activeClass.className} 累積評価一覧</h2>
 
           <div className="overflow-x-auto print-expand pb-4">
-            <table className="w-max text-sm text-center border-collapse border border-slate-300">
-              <thead className="bg-slate-100 text-slate-600 font-bold whitespace-nowrap">
+            <table className="w-max text-sm border-collapse border border-slate-300 table-fixed">
+              <thead className="bg-slate-100 text-slate-600 font-bold">
                 <tr>
-                  <th className="border border-slate-300 p-2 w-12 text-center">番号</th>
-                  <th className="border border-slate-300 p-2 w-48 text-left">氏名</th>
-                  <th className="border border-slate-300 p-2 w-16 text-center">性別</th>
+                  <th className="border border-slate-300 p-2 w-12 text-center shrink-0">番号</th>
+                  <th className="border border-slate-300 p-2 w-32 text-left shrink-0">氏名</th>
                   {classLessons.map(l => (
-                    <th key={l.id} className="border border-slate-300 p-1 w-16 text-[10px] leading-tight">
-                      第{l.count}回<br/><span className="font-normal">{l.date ? String(l.date).substring(5).replace('-','/') : '-'}</span>
+                    <th key={l.id} className="border border-slate-300 p-2 w-64 min-w-[240px] text-xs leading-tight">
+                      第{l.count}回 <span className="font-normal text-[10px] text-slate-500 ml-1">{l.date ? String(l.date).substring(5).replace('-','/') : '-'}</span>
                     </th>
                   ))}
-                  <th className="border border-slate-300 p-2 w-12 bg-blue-50 text-blue-800">A</th>
-                  <th className="border border-slate-300 p-2 w-12 bg-emerald-50 text-emerald-800">B</th>
-                  <th className="border border-slate-300 p-2 w-12 bg-orange-50 text-orange-800">C</th>
+                  <th className="border border-slate-300 p-2 w-12 bg-blue-50 text-blue-800 shrink-0 text-center">A</th>
+                  <th className="border border-slate-300 p-2 w-12 bg-emerald-50 text-emerald-800 shrink-0 text-center">B</th>
+                  <th className="border border-slate-300 p-2 w-12 bg-orange-50 text-orange-800 shrink-0 text-center">C</th>
                 </tr>
               </thead>
               <tbody>
@@ -960,26 +998,47 @@ ${JSON.stringify(targetData, null, 2)}
                   let a=0, b=0, c=0;
                   return (
                     <tr key={s.id} className="hover:bg-slate-50 border-b border-slate-200">
-                      <td className="border border-slate-300 p-2 text-center text-slate-500 font-bold">{s.number}</td>
-                      <td className="border border-slate-300 p-2 text-left bg-white">
+                      <td className="border border-slate-300 p-2 text-center text-slate-500 font-bold align-top">{s.number}</td>
+                      <td className="border border-slate-300 p-2 text-left bg-white align-top">
                         <div className="flex flex-col">
                           <div className="flex items-center gap-1.5">
-                            <span className="font-bold text-slate-700 text-base">{s.name}</span>
-                            {s.status !== "在籍" && <span className="text-[10px] bg-red-100 text-red-700 px-1 py-0.5 rounded font-bold border border-red-200 leading-none">{s.status}</span>}
+                            <span className="font-bold text-slate-700 text-sm whitespace-nowrap">{s.name}</span>
+                            {s.status !== "在籍" && <span className="text-[9px] bg-red-100 text-red-700 px-1 py-0.5 rounded font-bold border border-red-200 leading-none">{s.status}</span>}
                           </div>
-                          <span className="text-xs text-slate-400 font-normal mt-0.5">{s.furigana}</span>
+                          <span className="text-[10px] text-slate-400 font-normal mt-0.5 whitespace-nowrap">{s.furigana}</span>
                         </div>
                       </td>
-                      <td className="border border-slate-300 p-2 text-center text-slate-600 text-sm bg-white">{s.gender}</td>
                       {classLessons.map(l => {
-                        const ev = getFinalEval(l.id, s.id);
-                        if(ev==='A') a++; if(ev==='B') b++; if(ev==='C') c++;
-                        const color = ev==='A' ? 'text-blue-600 font-bold' : ev==='B' ? 'text-emerald-600 font-bold' : ev==='C' ? 'text-orange-600 font-bold' : 'text-slate-400';
-                        return <td key={l.id} className={`border border-slate-300 p-1 ${color} bg-white`}>{ev}</td>
+                        const data = getCellData(l.id, s.id);
+                        if (!data) return <td key={l.id} className="border border-slate-300 p-2 text-center text-slate-300 bg-white align-middle">-</td>;
+                        
+                        if(data.eval==='A') a++; if(data.eval==='B') b++; if(data.eval==='C') c++;
+                        
+                        const evalColorClass = data.eval === 'A' ? 'text-blue-600' : data.eval === 'B' ? 'text-emerald-600' : data.eval === 'C' ? 'text-orange-600' : 'text-slate-400';
+                        const attColorClass = data.attendance === '欠席' ? 'bg-red-100 text-red-700 border-red-200' : data.attendance === '未' ? 'bg-slate-100 text-slate-400 border-slate-200' : 'bg-slate-100 text-slate-600 border-slate-200';
+                        const isAbsent = data.attendance === '欠席';
+
+                        return (
+                          <td key={l.id} className={`border border-slate-300 p-2 bg-white align-top ${isAbsent ? 'bg-slate-50' : ''}`}>
+                            <div className="flex flex-col gap-1.5">
+                              <div className="flex justify-between items-center border-b border-slate-100 pb-1">
+                                <span className={`px-1.5 py-0.5 rounded border text-[10px] font-bold ${attColorClass}`}>{data.attendance}</span>
+                                <span className={`font-bold text-sm ${evalColorClass}`}>{data.eval || '-'}</span>
+                              </div>
+                              {!isAbsent && data.text ? (
+                                <div className="text-slate-600 text-[10px] leading-relaxed break-words whitespace-pre-wrap">
+                                  {data.text}
+                                </div>
+                              ) : !isAbsent ? (
+                                <div className="text-slate-300 text-[10px] text-center mt-1">未入力</div>
+                              ) : null}
+                            </div>
+                          </td>
+                        )
                       })}
-                      <td className="border border-slate-300 p-1 bg-blue-50/50 font-bold text-blue-800">{a || ''}</td>
-                      <td className="border border-slate-300 p-1 bg-emerald-50/50 font-bold text-emerald-800">{b || ''}</td>
-                      <td className="border border-slate-300 p-1 bg-orange-50/50 font-bold text-orange-800">{c || ''}</td>
+                      <td className="border border-slate-300 p-1 bg-blue-50/50 font-bold text-blue-800 text-center align-middle">{a || ''}</td>
+                      <td className="border border-slate-300 p-1 bg-emerald-50/50 font-bold text-emerald-800 text-center align-middle">{b || ''}</td>
+                      <td className="border border-slate-300 p-1 bg-orange-50/50 font-bold text-orange-800 text-center align-middle">{c || ''}</td>
                     </tr>
                   )
                 })}
