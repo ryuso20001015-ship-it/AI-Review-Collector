@@ -254,7 +254,6 @@ ${JSON.stringify(targetData)}
       return JSON.parse(textResponse);
     };
 
-    // クラス全体の振り返りを分析するAPI関数（プロンプト簡潔化）
     const callGeminiOverallAnalysisAPI = async (apiKey, targetData) => {
       const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`;
       const prompt = `あなたは中学校のベテラン教員です。以下の生徒たちの「授業の振り返り」を分析し、クラス全体の傾向を簡潔にまとめてください。
@@ -474,7 +473,6 @@ ${JSON.stringify(targetData, null, 2)}
         setActiveLessonId(newLesson.id);
       };
 
-      // 授業削除機能
       const deleteLesson = () => {
         if (!activeLesson) return;
         if (!window.confirm(`「${activeLesson.title}」を削除しますか？\n※この授業の振り返りデータも全て削除されます。`)) return;
@@ -515,7 +513,6 @@ ${JSON.stringify(targetData, null, 2)}
         }));
       };
 
-      // 出欠連携
       const syncAttendanceFromCloud = async () => {
         const code = appData.settings.attendanceSyncCode;
         if (!code) return showToast("設定画面で「授業出欠記録システム」の同期コードを入力してください。", "error");
@@ -569,7 +566,6 @@ ${JSON.stringify(targetData, null, 2)}
         }
       };
 
-      // テキスト流し込み（ペースト）
       const handleApplyPaste = () => {
         if (!activeLesson || !pasteText.trim()) return;
         const lines = pasteText.split('\n').map(l => l.trim()).filter(l => l !== "");
@@ -597,7 +593,6 @@ ${JSON.stringify(targetData, null, 2)}
         showToast("テキストを反映しました。", "success");
       };
 
-      // AI評価の実行
       const runAIEvaluation = async () => {
         if (!appData.settings.geminiApiKey) return showToast("設定画面からGemini APIキーを登録してください。", "error");
         if (!activeLesson) return;
@@ -644,7 +639,6 @@ ${JSON.stringify(targetData, null, 2)}
         }
       };
 
-      // AI授業全体分析の実行
       const runOverallAnalysis = async () => {
         if (!appData.settings.geminiApiKey) return showToast("設定画面からGemini APIキーを登録してください。", "error");
         if (!activeLesson) return;
@@ -746,10 +740,10 @@ ${JSON.stringify(targetData, null, 2)}
                     <span className="text-xs font-bold text-slate-500">
                       入力済み: {activeClass.students.filter(s => getReview(s.id).text).length} 名
                     </span>
-                    <div className="flex flex-col items-end w-48 relative">
+                    <div className="flex flex-col items-end w-40 relative">
                       <button onClick={runOverallAnalysis} disabled={isAnalyzing} className="bg-white border border-blue-300 text-blue-700 hover:bg-blue-50 px-3 py-1.5 rounded text-xs font-bold transition-colors flex items-center gap-1.5 shadow-sm w-full justify-center">
                         {isAnalyzing ? <i className="fa-solid fa-spinner fa-spin"></i> : <i className="fa-solid fa-lightbulb text-amber-500"></i>}
-                        {isAnalyzing ? "AI分析中..." : "振り返りからクラス全体を分析"}
+                        {isAnalyzing ? "AI分析中..." : "クラス全体を分析"}
                       </button>
                       {/* 分析進捗ゲージ */}
                       {isAnalyzing && (
@@ -775,10 +769,10 @@ ${JSON.stringify(targetData, null, 2)}
 
               <div className="flex justify-between items-center mb-3">
                 <h3 className="font-bold text-slate-700 flex items-center gap-2"><i className="fa-solid fa-list-check"></i> 個別評価リスト</h3>
-                <div className="flex flex-col items-end w-48 relative">
+                <div className="flex flex-col items-end w-32 relative">
                   <button onClick={runAIEvaluation} disabled={isEvaluating} className="bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 text-white px-4 py-2 rounded text-sm font-bold transition-colors flex items-center gap-2 shadow-sm w-full justify-center">
                     {isEvaluating ? <i className="fa-solid fa-spinner fa-spin"></i> : <i className="fa-solid fa-wand-magic-sparkles"></i>}
-                    未評価をAIで判定
+                    評価開始
                   </button>
                   {/* 評価進捗ゲージ */}
                   {isEvaluating && (
@@ -930,7 +924,7 @@ ${JSON.stringify(targetData, null, 2)}
       const exportCSV = () => {
         if (!activeClass) return;
         let csvContent = "\uFEFF"; // BOM
-        csvContent += `番号,氏名,ふりがな,性別,${classLessons.map(l => l.title || '無題').join(',')},A,B,C\n`;
+        csvContent += `番号,氏名,ふりがな,性別,${classLessons.map(l => l.title || '無題').join(',')},最終評価,A,B,C\n`;
 
         (activeClass.students || []).forEach(s => {
           let row = [s.number, s.name, s.furigana || '', s.gender || ''];
@@ -938,11 +932,21 @@ ${JSON.stringify(targetData, null, 2)}
           classLessons.forEach(l => {
             const data = getCellData(l.id, s.id);
             const ev = data ? data.eval : "";
-            // Excel等での成績処理連携を考慮し、CSVには出欠やテキストは含めず「評価値」のみ出力します。
             row.push(data && data.attendance === '欠席' ? '欠' : ev);
             if(ev==='A') a++; if(ev==='B') b++; if(ev==='C') c++;
           });
-          row.push(a, b, c);
+
+          // 最終評価の自動算出
+          let finalEval = "";
+          const totalEvalCount = a + b + c;
+          if (totalEvalCount > 0) {
+            const avg = (a * 3 + b * 2 + c * 1) / totalEvalCount;
+            if (avg >= 2.5) finalEval = "A";
+            else if (avg >= 1.5) finalEval = "B";
+            else finalEval = "C";
+          }
+
+          row.push(finalEval, a, b, c);
           csvContent += row.join(',') + "\n";
         });
 
@@ -963,7 +967,7 @@ ${JSON.stringify(targetData, null, 2)}
               <select value={activeClassId} onChange={e => setActiveClassId(e.target.value)} className="border border-slate-300 rounded p-1.5 text-sm font-bold bg-slate-50 text-slate-700 outline-none focus:ring-2 focus:ring-blue-500">
                 {appData.classes.map(c => <option key={c.classId} value={c.classId}>{c.className}</option>)}
               </select>
-              <span className="text-xs text-slate-500 font-bold hidden sm:inline"><i className="fa-solid fa-circle-info text-blue-400"></i> 各回のセルには出欠状況と振り返りテキストが表示されます。</span>
+              <span className="text-xs text-slate-500 font-bold hidden sm:inline"><i className="fa-solid fa-circle-info text-blue-400"></i> 各回のセルには出欠状況と評価が表示されます。</span>
             </div>
             <div className="flex gap-2">
               <button onClick={exportCSV} className="bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 px-3 py-1.5 rounded text-sm font-bold transition-colors flex items-center gap-1.5">
@@ -984,10 +988,11 @@ ${JSON.stringify(targetData, null, 2)}
                   <th className="border border-slate-300 p-2 w-12 text-center shrink-0">番号</th>
                   <th className="border border-slate-300 p-2 w-32 text-left shrink-0">氏名</th>
                   {classLessons.map(l => (
-                    <th key={l.id} className="border border-slate-300 p-2 w-64 min-w-[240px] text-xs leading-tight">
-                      第{l.count}回 <span className="font-normal text-[10px] text-slate-500 ml-1">{l.date ? String(l.date).substring(5).replace('-','/') : '-'}</span>
+                    <th key={l.id} className="border border-slate-300 p-2 w-20 min-w-[80px] text-xs leading-tight text-center">
+                      第{l.count}回 <br/><span className="font-normal text-[10px] text-slate-500">{l.date ? String(l.date).substring(5).replace('-','/') : '-'}</span>
                     </th>
                   ))}
+                  <th className="border border-slate-300 p-2 w-16 bg-indigo-50 text-indigo-800 shrink-0 text-center">最終評価</th>
                   <th className="border border-slate-300 p-2 w-12 bg-blue-50 text-blue-800 shrink-0 text-center">A</th>
                   <th className="border border-slate-300 p-2 w-12 bg-emerald-50 text-emerald-800 shrink-0 text-center">B</th>
                   <th className="border border-slate-300 p-2 w-12 bg-orange-50 text-orange-800 shrink-0 text-center">C</th>
@@ -996,10 +1001,44 @@ ${JSON.stringify(targetData, null, 2)}
               <tbody>
                 {(activeClass.students || []).map(s => {
                   let a=0, b=0, c=0;
+                  
+                  // 各回のセルレンダリング要素を構築しつつ、A/B/Cの数をカウント
+                  const cells = classLessons.map(l => {
+                    const data = getCellData(l.id, s.id);
+                    if (!data) return <td key={l.id} className="border border-slate-300 p-2 text-center text-slate-300 bg-white align-middle">-</td>;
+                    
+                    if(data.eval==='A') a++; if(data.eval==='B') b++; if(data.eval==='C') c++;
+                    
+                    const evalColorClass = data.eval === 'A' ? 'text-blue-600' : data.eval === 'B' ? 'text-emerald-600' : data.eval === 'C' ? 'text-orange-600' : 'text-slate-400';
+                    const attColorClass = data.attendance === '欠席' ? 'bg-red-100 text-red-700 border-red-200' : data.attendance === '未' ? 'bg-slate-100 text-slate-400 border-slate-200' : 'bg-slate-100 text-slate-600 border-slate-200';
+                    const isAbsent = data.attendance === '欠席';
+
+                    return (
+                      <td key={l.id} className={`border border-slate-300 p-1.5 bg-white align-middle ${isAbsent ? 'bg-slate-50' : ''}`}>
+                        <div className="flex flex-col items-center justify-center gap-1.5">
+                          <span className={`px-1.5 py-0.5 rounded border text-[10px] font-bold leading-none ${attColorClass}`}>{data.attendance}</span>
+                          <span className={`font-bold text-sm leading-none ${evalColorClass}`}>{data.eval || '-'}</span>
+                        </div>
+                      </td>
+                    )
+                  });
+
+                  // 最終評価の自動算出 (A=3点, B=2点, C=1点 の平均値から算出)
+                  let finalEval = "";
+                  const totalEvalCount = a + b + c;
+                  if (totalEvalCount > 0) {
+                    const avg = (a * 3 + b * 2 + c * 1) / totalEvalCount;
+                    if (avg >= 2.5) finalEval = "A";
+                    else if (avg >= 1.5) finalEval = "B";
+                    else finalEval = "C";
+                  }
+
+                  const finalEvalColor = finalEval === 'A' ? 'text-blue-700 bg-blue-50/50' : finalEval === 'B' ? 'text-emerald-700 bg-emerald-50/50' : finalEval === 'C' ? 'text-orange-700 bg-orange-50/50' : 'text-slate-400 bg-slate-50';
+
                   return (
                     <tr key={s.id} className="hover:bg-slate-50 border-b border-slate-200">
-                      <td className="border border-slate-300 p-2 text-center text-slate-500 font-bold align-top">{s.number}</td>
-                      <td className="border border-slate-300 p-2 text-left bg-white align-top">
+                      <td className="border border-slate-300 p-2 text-center text-slate-500 font-bold align-middle">{s.number}</td>
+                      <td className="border border-slate-300 p-2 text-left bg-white align-middle">
                         <div className="flex flex-col">
                           <div className="flex items-center gap-1.5">
                             <span className="font-bold text-slate-700 text-sm whitespace-nowrap">{s.name}</span>
@@ -1008,37 +1047,11 @@ ${JSON.stringify(targetData, null, 2)}
                           <span className="text-[10px] text-slate-400 font-normal mt-0.5 whitespace-nowrap">{s.furigana}</span>
                         </div>
                       </td>
-                      {classLessons.map(l => {
-                        const data = getCellData(l.id, s.id);
-                        if (!data) return <td key={l.id} className="border border-slate-300 p-2 text-center text-slate-300 bg-white align-middle">-</td>;
-                        
-                        if(data.eval==='A') a++; if(data.eval==='B') b++; if(data.eval==='C') c++;
-                        
-                        const evalColorClass = data.eval === 'A' ? 'text-blue-600' : data.eval === 'B' ? 'text-emerald-600' : data.eval === 'C' ? 'text-orange-600' : 'text-slate-400';
-                        const attColorClass = data.attendance === '欠席' ? 'bg-red-100 text-red-700 border-red-200' : data.attendance === '未' ? 'bg-slate-100 text-slate-400 border-slate-200' : 'bg-slate-100 text-slate-600 border-slate-200';
-                        const isAbsent = data.attendance === '欠席';
-
-                        return (
-                          <td key={l.id} className={`border border-slate-300 p-2 bg-white align-top ${isAbsent ? 'bg-slate-50' : ''}`}>
-                            <div className="flex flex-col gap-1.5">
-                              <div className="flex justify-between items-center border-b border-slate-100 pb-1">
-                                <span className={`px-1.5 py-0.5 rounded border text-[10px] font-bold ${attColorClass}`}>{data.attendance}</span>
-                                <span className={`font-bold text-sm ${evalColorClass}`}>{data.eval || '-'}</span>
-                              </div>
-                              {!isAbsent && data.text ? (
-                                <div className="text-slate-600 text-[10px] leading-relaxed break-words whitespace-pre-wrap">
-                                  {data.text}
-                                </div>
-                              ) : !isAbsent ? (
-                                <div className="text-slate-300 text-[10px] text-center mt-1">未入力</div>
-                              ) : null}
-                            </div>
-                          </td>
-                        )
-                      })}
-                      <td className="border border-slate-300 p-1 bg-blue-50/50 font-bold text-blue-800 text-center align-middle">{a || ''}</td>
-                      <td className="border border-slate-300 p-1 bg-emerald-50/50 font-bold text-emerald-800 text-center align-middle">{b || ''}</td>
-                      <td className="border border-slate-300 p-1 bg-orange-50/50 font-bold text-orange-800 text-center align-middle">{c || ''}</td>
+                      {cells}
+                      <td className={`border border-slate-300 p-1 font-bold text-center align-middle text-sm ${finalEvalColor}`}>{finalEval}</td>
+                      <td className="border border-slate-300 p-1 bg-blue-50/30 font-bold text-blue-800 text-center align-middle">{a || ''}</td>
+                      <td className="border border-slate-300 p-1 bg-emerald-50/30 font-bold text-emerald-800 text-center align-middle">{b || ''}</td>
+                      <td className="border border-slate-300 p-1 bg-orange-50/30 font-bold text-orange-800 text-center align-middle">{c || ''}</td>
                     </tr>
                   )
                 })}
