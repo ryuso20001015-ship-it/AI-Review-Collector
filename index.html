@@ -151,7 +151,7 @@
       ],
       rubrics: { "1": DEFAULT_RUBRIC, "2": DEFAULT_RUBRIC, "3": DEFAULT_RUBRIC },
       lessons: [], // { id, classId, count, title, date, overallAnalysis: "" }
-      reviews: {}  // key: "lessonId_studentId", value: { attendance: "出席", text: "", aiEval: "", aiReason: "", manualEval: "" }
+      reviews: {}  // key: "lessonId_studentId", value: { attendance: "未", text: "", aiEval: "", aiReason: "", manualEval: "" }
     };
 
     // データの欠落を完全に補完・修復する関数
@@ -469,9 +469,9 @@ ${JSON.stringify(targetData, null, 2)}
       };
 
       const getReview = (studentId) => {
-        if(!activeLesson) return { attendance: "出席", text: "", aiEval: "", aiReason: "", manualEval: "" };
+        if(!activeLesson) return { attendance: "未", text: "", aiEval: "", aiReason: "", manualEval: "" };
         const reviews = appData.reviews || {};
-        return reviews[`${activeLesson.id}_${studentId}`] || { attendance: "出席", text: "", aiEval: "", aiReason: "", manualEval: "" };
+        return reviews[`${activeLesson.id}_${studentId}`] || { attendance: "未", text: "", aiEval: "", aiReason: "", manualEval: "" };
       };
 
       const updateReview = (studentId, updates) => {
@@ -511,9 +511,9 @@ ${JSON.stringify(targetData, null, 2)}
                 const attStudent = attClass.students.find(st => st.name === s.name);
                 if (attStudent) {
                   const attRecord = attData.attendances[`${attLessonId}_${attStudent.id}`];
-                  const status = attRecord?.status || "出席";
+                  const status = attRecord?.status || "未";
                   const key = `${activeLesson.id}_${s.id}`;
-                  const current = newReviews[key] || { text: "", aiEval: "", aiReason: "", manualEval: "" };
+                  const current = newReviews[key] || { attendance: "未", text: "", aiEval: "", aiReason: "", manualEval: "" };
                   newReviews[key] = { ...current, attendance: status };
                   syncCount++;
                 }
@@ -548,7 +548,7 @@ ${JSON.stringify(targetData, null, 2)}
         activeStudents.forEach((s, index) => {
           if (lines[index] !== undefined) {
             const key = `${activeLesson.id}_${s.id}`;
-            const current = newReviews[key] || { attendance: "出席", aiEval: "", aiReason: "", manualEval: "" };
+            const current = newReviews[key] || { attendance: "未", aiEval: "", aiReason: "", manualEval: "" };
             newReviews[key] = { ...current, text: lines[index] };
           }
         });
@@ -644,6 +644,12 @@ ${JSON.stringify(targetData, null, 2)}
         return "bg-slate-100 text-slate-400 border-slate-200";
       };
 
+      const attendanceSelectClass = (att) => {
+        if (att === '欠席') return 'bg-red-100 text-red-700 border-red-200';
+        if (att === '未') return 'bg-slate-100 text-slate-500 border-slate-300 font-normal';
+        return 'bg-white text-slate-600 border-slate-300';
+      };
+
       return (
         <div className="space-y-4">
           <div className="bg-white p-3 rounded-lg shadow-sm border border-slate-200 flex flex-wrap gap-4 items-center justify-between">
@@ -680,22 +686,11 @@ ${JSON.stringify(targetData, null, 2)}
                   <button onClick={syncAttendanceFromCloud} className="bg-amber-100 hover:bg-amber-200 text-amber-800 border border-amber-300 px-3 py-2 rounded text-sm font-bold transition-colors flex items-center gap-1.5">
                     <i className="fa-solid fa-sync"></i> 出欠反映
                   </button>
-                  <button onClick={() => setIsPasteMode(!isPasteMode)} className="bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 px-3 py-2 rounded text-sm font-bold transition-colors flex items-center gap-1.5">
+                  <button onClick={() => setIsPasteMode(true)} className="bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 px-3 py-2 rounded text-sm font-bold transition-colors flex items-center gap-1.5">
                     <i className="fa-solid fa-paste"></i> テキスト流し込み
                   </button>
                 </div>
               </div>
-
-              {isPasteMode && (
-                <div className="mb-6 p-4 bg-indigo-50 border border-indigo-200 rounded-lg">
-                  <p className="text-xs text-indigo-800 font-bold mb-2"><i className="fa-solid fa-info-circle"></i> スプレッドシートからコピーしたテキストの列をそのまま貼り付けてください。（欠席者は自動スキップされます）</p>
-                  <textarea value={pasteText} onChange={e => setPasteText(e.target.value)} rows="5" className="w-full border border-indigo-300 rounded p-2 text-sm focus:ring-2 focus:ring-indigo-500 mb-2" placeholder="テキストをペースト..."></textarea>
-                  <div className="flex justify-end gap-2">
-                    <button onClick={() => setIsPasteMode(false)} className="px-4 py-1.5 text-sm bg-white border border-slate-300 rounded hover:bg-slate-50 font-bold">キャンセル</button>
-                    <button onClick={handleApplyPaste} className="px-4 py-1.5 text-sm bg-indigo-600 text-white rounded hover:bg-indigo-700 font-bold">反映する</button>
-                  </div>
-                </div>
-              )}
 
               {/* 授業全体の分析とアドバイス パネル */}
               <div className="mb-6 bg-slate-50 border border-slate-200 rounded-lg p-4">
@@ -736,8 +731,8 @@ ${JSON.stringify(targetData, null, 2)}
                 <table className="w-full text-sm text-left whitespace-nowrap">
                   <thead className="bg-slate-100 text-slate-600 border-b border-slate-200">
                     <tr>
-                      <th className="p-2 w-10 text-center">番</th>
-                      <th className="p-2 w-40">氏名</th>
+                      <th className="p-2 w-12 text-center">番号</th>
+                      <th className="p-2 w-48 text-left">氏名</th>
                       <th className="p-2 w-16 text-center">性別</th>
                       <th className="p-2 w-20 text-center">出欠</th>
                       <th className="p-2 min-w-[250px]">振り返りテキスト</th>
@@ -753,17 +748,21 @@ ${JSON.stringify(targetData, null, 2)}
                       return (
                         <tr key={s.id} className={`border-b border-slate-100 hover:bg-slate-50 ${isAbsent ? 'bg-slate-50 opacity-60' : ''}`}>
                           <td className="p-2 text-center text-slate-500 font-bold">{s.number}</td>
-                          <td className="p-2 font-bold text-slate-700">
-                            <ruby>
-                              {s.name}
-                              <rt className="text-[10px] text-slate-400 font-normal">{s.furigana}</rt>
-                            </ruby>
+                          <td className="p-2 text-left">
+                            <div className="flex flex-col">
+                              <div className="flex items-center gap-1.5">
+                                <span className="font-bold text-slate-700 text-base">{s.name}</span>
+                                {s.status !== "在籍" && <span className="text-[10px] bg-red-100 text-red-700 px-1 py-0.5 rounded font-bold border border-red-200 leading-none">{s.status}</span>}
+                              </div>
+                              <span className="text-xs text-slate-400 font-normal mt-0.5">{s.furigana}</span>
+                            </div>
                           </td>
-                          <td className="p-2 text-center text-slate-500 text-xs">
+                          <td className="p-2 text-center text-slate-600 text-sm">
                             {s.gender}
                           </td>
                           <td className="p-2 text-center">
-                            <select value={rev.attendance} onChange={e => updateReview(s.id, { attendance: e.target.value })} className={`border rounded px-1 py-0.5 text-xs font-bold outline-none cursor-pointer ${rev.attendance === '欠席' ? 'bg-red-100 text-red-700 border-red-200' : 'bg-white text-slate-600 border-slate-300'}`}>
+                            <select value={rev.attendance} onChange={e => updateReview(s.id, { attendance: e.target.value })} className={`border rounded px-1 py-1 text-xs font-bold outline-none cursor-pointer ${attendanceSelectClass(rev.attendance)}`}>
+                              <option value="未">未</option>
                               <option value="出席">出席</option>
                               <option value="欠席">欠席</option>
                               <option value="遅刻">遅刻</option>
@@ -772,7 +771,7 @@ ${JSON.stringify(targetData, null, 2)}
                             </select>
                           </td>
                           <td className="p-2">
-                            <input type="text" value={rev.text} onChange={e => updateReview(s.id, { text: e.target.value })} disabled={isAbsent} className="w-full border border-slate-200 rounded px-2 py-1 text-xs focus:ring-2 focus:ring-blue-500 disabled:bg-transparent disabled:border-transparent" placeholder={isAbsent ? "-" : "テキストを入力..."} />
+                            <input type="text" value={rev.text} onChange={e => updateReview(s.id, { text: e.target.value })} disabled={isAbsent} className="w-full border border-slate-200 rounded px-2 py-1.5 text-sm focus:ring-2 focus:ring-blue-500 disabled:bg-transparent disabled:border-transparent" placeholder={isAbsent ? "-" : "テキストを入力..."} />
                           </td>
                           <td className="p-2 text-center">
                             <div className={`inline-flex items-center justify-center w-6 h-6 rounded border font-bold text-xs ${evalColor(rev.aiEval)}`}>
@@ -798,6 +797,45 @@ ${JSON.stringify(targetData, null, 2)}
               </div>
             </div>
           )}
+
+          {/* テキスト流し込み用 モーダルポップアップ */}
+          {isPasteMode && (
+            <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
+              <div className="bg-white rounded-lg shadow-xl w-full max-w-2xl overflow-hidden flex flex-col max-h-[90vh]">
+                <div className="bg-indigo-800 text-white px-4 py-3 font-bold flex justify-between items-center">
+                  <span><i className="fa-solid fa-paste mr-2"></i>振り返りテキストの流し込み</span>
+                  <button onClick={() => setIsPasteMode(false)} className="text-white hover:text-gray-300">
+                    <i className="fa-solid fa-times text-lg"></i>
+                  </button>
+                </div>
+                <div className="p-4 overflow-y-auto">
+                  <div className="bg-indigo-50 border border-indigo-200 text-indigo-800 text-sm p-3 rounded mb-4">
+                    <p className="font-bold mb-1"><i className="fa-solid fa-info-circle"></i> スプレッドシートからのコピー＆ペースト</p>
+                    <ul className="list-disc pl-5 space-y-1 text-xs">
+                      <li>スプレッドシート等で、該当授業の「振り返り」の列のみを選択してコピーし、下に貼り付けてください。</li>
+                      <li>名簿の上から順にテキストが反映されます。<strong>※欠席者は自動的にスキップされます。</strong></li>
+                    </ul>
+                  </div>
+                  <textarea
+                    autoFocus
+                    value={pasteText}
+                    onChange={e => setPasteText(e.target.value)}
+                    className="w-full border border-gray-300 rounded p-3 text-sm font-mono whitespace-pre focus:ring-2 focus:ring-indigo-500 h-64"
+                    placeholder="ここにテキストをペーストしてください..."
+                  />
+                </div>
+                <div className="bg-gray-50 px-4 py-3 flex justify-end gap-2 border-t">
+                  <button onClick={() => setIsPasteMode(false)} className="px-4 py-2 rounded border hover:bg-gray-100 text-sm font-medium">
+                    キャンセル
+                  </button>
+                  <button onClick={handleApplyPaste} className="px-4 py-2 rounded bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-bold flex items-center gap-2">
+                    <i className="fa-solid fa-check"></i> 反映する
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
         </div>
       );
     }
@@ -815,6 +853,7 @@ ${JSON.stringify(targetData, null, 2)}
         const rev = reviews[`${lessonId}_${studentId}`];
         if (!rev) return "";
         if (rev.attendance === "欠席") return "欠";
+        if (rev.attendance === "未") return "";
         return rev.manualEval || rev.aiEval || "";
       };
 
@@ -863,21 +902,22 @@ ${JSON.stringify(targetData, null, 2)}
 
           <h2 className="hidden print:block text-lg font-bold mb-4 text-center">{activeClass.className} 累積評価一覧</h2>
 
-          <div className="overflow-x-auto print-expand">
-            <table className="w-full text-sm text-center border-collapse border border-slate-300">
-              <thead className="bg-slate-100 text-slate-600 font-bold">
+          <div className="overflow-x-auto print-expand pb-4">
+            {/* w-max で囲むことで、授業数が少ない時でも列が間延びしないように制限 */}
+            <table className="w-max text-sm text-center border-collapse border border-slate-300">
+              <thead className="bg-slate-100 text-slate-600 font-bold whitespace-nowrap">
                 <tr>
-                  <th className="border border-slate-300 p-2 w-10">番</th>
-                  <th className="border border-slate-300 p-2 w-32 text-left">氏名</th>
+                  <th className="border border-slate-300 p-2 w-12 text-center">番号</th>
+                  <th className="border border-slate-300 p-2 w-48 text-left">氏名</th>
                   <th className="border border-slate-300 p-2 w-16 text-center">性別</th>
                   {classLessons.map(l => (
-                    <th key={l.id} className="border border-slate-300 p-1 w-12 text-[10px] leading-tight">
+                    <th key={l.id} className="border border-slate-300 p-1 w-16 text-[10px] leading-tight">
                       第{l.count}回<br/><span className="font-normal">{l.date ? String(l.date).substring(5).replace('-','/') : '-'}</span>
                     </th>
                   ))}
-                  <th className="border border-slate-300 p-2 w-10 bg-blue-50 text-blue-800">A</th>
-                  <th className="border border-slate-300 p-2 w-10 bg-emerald-50 text-emerald-800">B</th>
-                  <th className="border border-slate-300 p-2 w-10 bg-orange-50 text-orange-800">C</th>
+                  <th className="border border-slate-300 p-2 w-12 bg-blue-50 text-blue-800">A</th>
+                  <th className="border border-slate-300 p-2 w-12 bg-emerald-50 text-emerald-800">B</th>
+                  <th className="border border-slate-300 p-2 w-12 bg-orange-50 text-orange-800">C</th>
                 </tr>
               </thead>
               <tbody>
@@ -885,19 +925,22 @@ ${JSON.stringify(targetData, null, 2)}
                   let a=0, b=0, c=0;
                   return (
                     <tr key={s.id} className="hover:bg-slate-50 border-b border-slate-200">
-                      <td className="border border-slate-300 p-1 text-slate-500">{s.number}</td>
-                      <td className="border border-slate-300 p-1 text-left font-bold text-slate-700">
-                        <ruby>
-                          {s.name}
-                          <rt className="text-[10px] text-slate-400 font-normal">{s.furigana}</rt>
-                        </ruby>
+                      <td className="border border-slate-300 p-2 text-center text-slate-500 font-bold">{s.number}</td>
+                      <td className="border border-slate-300 p-2 text-left bg-white">
+                        <div className="flex flex-col">
+                          <div className="flex items-center gap-1.5">
+                            <span className="font-bold text-slate-700 text-base">{s.name}</span>
+                            {s.status !== "在籍" && <span className="text-[10px] bg-red-100 text-red-700 px-1 py-0.5 rounded font-bold border border-red-200 leading-none">{s.status}</span>}
+                          </div>
+                          <span className="text-xs text-slate-400 font-normal mt-0.5">{s.furigana}</span>
+                        </div>
                       </td>
-                      <td className="border border-slate-300 p-1 text-center text-slate-500 text-xs">{s.gender}</td>
+                      <td className="border border-slate-300 p-2 text-center text-slate-600 text-sm bg-white">{s.gender}</td>
                       {classLessons.map(l => {
                         const ev = getFinalEval(l.id, s.id);
                         if(ev==='A') a++; if(ev==='B') b++; if(ev==='C') c++;
                         const color = ev==='A' ? 'text-blue-600 font-bold' : ev==='B' ? 'text-emerald-600 font-bold' : ev==='C' ? 'text-orange-600 font-bold' : 'text-slate-400';
-                        return <td key={l.id} className={`border border-slate-300 p-1 ${color}`}>{ev}</td>
+                        return <td key={l.id} className={`border border-slate-300 p-1 ${color} bg-white`}>{ev}</td>
                       })}
                       <td className="border border-slate-300 p-1 bg-blue-50/50 font-bold text-blue-800">{a || ''}</td>
                       <td className="border border-slate-300 p-1 bg-emerald-50/50 font-bold text-emerald-800">{b || ''}</td>
@@ -1132,10 +1175,15 @@ ${JSON.stringify(targetData, null, 2)}
           </div>
 
           {bulkImport.show && (
-            <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
-              <div className="bg-white rounded-lg shadow-xl w-full max-w-lg overflow-hidden">
-                <div className="bg-indigo-700 text-white px-4 py-3 font-bold">名簿データ一括追加</div>
-                <div className="p-4">
+            <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
+              <div className="bg-white rounded-lg shadow-xl w-full max-w-lg overflow-hidden flex flex-col max-h-[90vh]">
+                <div className="bg-indigo-800 text-white px-4 py-3 font-bold flex justify-between items-center">
+                  <span><i className="fa-solid fa-file-import mr-2"></i>名簿データ一括追加</span>
+                  <button onClick={() => setBulkImport({ show: false, text: '' })} className="text-white hover:text-gray-300">
+                    <i className="fa-solid fa-times text-lg"></i>
+                  </button>
+                </div>
+                <div className="p-4 overflow-y-auto">
                   <p className="text-xs text-slate-500 mb-2">Excel等から「出席番号」「氏名」「ふりがな」「性別」の列をコピーして貼り付けてください。</p>
                   <textarea value={bulkImport.text} onChange={e => setBulkImport({...bulkImport, text: e.target.value})} className="w-full h-48 border rounded p-2 text-sm font-mono" placeholder="1 山田太郎 やまだたろう 男&#10;2 佐藤花子 さとうはなこ 女"></textarea>
                 </div>
