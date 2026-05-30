@@ -97,7 +97,7 @@
                 onClick={() => {
                   if (window.confirm("端末内のデータを初期化して再読み込みします。よろしいですか？")) {
                     localStorage.removeItem('ai_review_app_data');
-                    localStorage.removeItem('ai_review_sync_id'); // 同期IDも完全に削除してクリーンな状態にする
+                    localStorage.removeItem('ai_review_sync_id'); 
                     window.location.reload();
                   }
                 }}
@@ -150,8 +150,8 @@
         }
       ],
       rubrics: { "1": DEFAULT_RUBRIC, "2": DEFAULT_RUBRIC, "3": DEFAULT_RUBRIC },
-      lessons: [], // { id, classId, count, title, date, overallAnalysis: "" }
-      reviews: {}  // key: "lessonId_studentId", value: { attendance: "未", text: "", aiEval: "", aiReason: "", manualEval: "" }
+      lessons: [], 
+      reviews: {}  
     };
 
     // データの欠落を完全に補完・修復する関数
@@ -464,6 +464,27 @@ ${JSON.stringify(targetData, null, 2)}
         setActiveLessonId(newLesson.id);
       };
 
+      // 授業削除機能
+      const deleteLesson = () => {
+        if (!activeLesson) return;
+        if (!window.confirm(`「${activeLesson.title}」を削除しますか？\n※この授業の振り返りデータも全て削除されます。`)) return;
+
+        const newLessons = appData.lessons.filter(l => l.id !== activeLesson.id);
+        const newReviews = { ...(appData.reviews || {}) };
+        
+        Object.keys(newReviews).forEach(key => {
+          if (key.startsWith(`${activeLesson.id}_`)) {
+            delete newReviews[key];
+          }
+        });
+
+        setAppData(prev => ({ ...prev, lessons: newLessons, reviews: newReviews }));
+        
+        const remainingLessons = newLessons.filter(l => l.classId === activeClassId);
+        setActiveLessonId(remainingLessons.length > 0 ? remainingLessons[0].id : "");
+        showToast("授業を削除しました。", "success");
+      };
+
       const updateLesson = (id, field, value) => {
         setAppData({ ...appData, lessons: appData.lessons.map(l => l.id === id ? { ...l, [field]: value } : l) });
       };
@@ -511,7 +532,17 @@ ${JSON.stringify(targetData, null, 2)}
                 const attStudent = attClass.students.find(st => st.name === s.name);
                 if (attStudent) {
                   const attRecord = attData.attendances[`${attLessonId}_${attStudent.id}`];
-                  const status = attRecord?.status || "未";
+                  
+                  // 出欠状況のマッピング処理（出欠アプリで特に指定がない＝出席とみなす）
+                  let status = "出席";
+                  if (attRecord && attRecord.status) {
+                    if (attRecord.status === "保健室" || attRecord.status === "その他") {
+                      status = "他";
+                    } else {
+                      status = attRecord.status; // 欠席, 遅刻, 早退
+                    }
+                  }
+                  
                   const key = `${activeLesson.id}_${s.id}`;
                   const current = newReviews[key] || { attendance: "未", text: "", aiEval: "", aiReason: "", manualEval: "" };
                   newReviews[key] = { ...current, attendance: status };
@@ -668,6 +699,11 @@ ${JSON.stringify(targetData, null, 2)}
               <button onClick={addLesson} className="text-sm bg-slate-100 hover:bg-slate-200 text-slate-600 px-3 py-1.5 rounded font-bold border border-slate-300 transition-colors">
                 <i className="fa-solid fa-plus"></i> 追加
               </button>
+              {activeLesson && (
+                <button onClick={deleteLesson} className="text-sm bg-red-50 hover:bg-red-100 text-red-600 px-3 py-1.5 rounded font-bold border border-red-200 transition-colors ml-1">
+                  <i className="fa-solid fa-trash"></i> 削除
+                </button>
+              )}
             </div>
           </div>
 
@@ -903,7 +939,6 @@ ${JSON.stringify(targetData, null, 2)}
           <h2 className="hidden print:block text-lg font-bold mb-4 text-center">{activeClass.className} 累積評価一覧</h2>
 
           <div className="overflow-x-auto print-expand pb-4">
-            {/* w-max で囲むことで、授業数が少ない時でも列が間延びしないように制限 */}
             <table className="w-max text-sm text-center border-collapse border border-slate-300">
               <thead className="bg-slate-100 text-slate-600 font-bold whitespace-nowrap">
                 <tr>
