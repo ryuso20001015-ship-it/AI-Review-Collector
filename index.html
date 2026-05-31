@@ -295,7 +295,7 @@ ${JSON.stringify(targetData)}
         })
       });
       
-      // ★ 429エラー（無料枠超過）等のハンドリング強化
+      // ★ 429エラー等のハンドリング
       if (!response.ok) {
         const err = await response.text();
         if (response.status === 429) {
@@ -310,7 +310,7 @@ ${JSON.stringify(targetData)}
 
     const callGeminiOverallAnalysisAPI = async (apiKey, targetData) => {
       const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`;
-      const prompt = `あなたは中学校のベテラン教員です。以下の生徒たちの「授業の振り返り」を分析し、クラス全体の傾向を簡潔にまとめてください。
+      const prompt = `あなたは中学校のベテラン教員です。以下の生徒たちの「授業の振り返り」を分析し、クラス全体の傾向をまとめてください。
 
 【生徒の振り返りテキスト（抜粋）】
 ${JSON.stringify(targetData, null, 2)}
@@ -318,11 +318,18 @@ ${JSON.stringify(targetData, null, 2)}
 【出力形式の厳守事項】
 ・挨拶や前置き（「はい、承知しました」等）は一切書かないでください。分析結果のみを直接出力してください。
 ・マークダウン記号（** や # など）は一切使用しないでください。
-・以下の3項目について、それぞれ2〜3文程度で非常に簡潔に記述してください。
+・以下のフォーマットに必ず従い、指定された項目を出力してください。
 
-1. クラス全体の理解度と傾向
-2. 共通して見られるつまずきや疑問点
-3. 次回の授業に向けたアドバイス`;
+■ 全体評価
+学習内容理解度：★（1〜5の星マークで5段階評価。例: ★★★☆☆）
+授業への意欲：★（1〜5の星マークで5段階評価。例: ★★★★☆）
+
+■ 評価の理由（2〜3文程度）
+（理解度と意欲に関するクラス全体の傾向を簡潔に記述してください）
+
+■ 次回への課題・疑問点
+・（生徒のテキストから抽出した共通のつまずきや課題を1点目）
+・（生徒のテキストから抽出した共通のつまずきや課題を2点目）`;
 
       const response = await fetch(url, {
         method: 'POST',
@@ -711,8 +718,6 @@ ${JSON.stringify(targetData, null, 2)}
       const handleApplyPaste = () => {
         if (!activeLesson || !pasteText) return;
         
-        // ★修正: 空白の行（スプレッドシートの空欄）を削除せず、そのまま残す
-        // 最後の余分な改行による空文字列のみ削除する
         let lines = pasteText.split('\n').map(l => l.trim());
         while (lines.length > 0 && lines[lines.length - 1] === "") {
           lines.pop();
@@ -732,7 +737,7 @@ ${JSON.stringify(targetData, null, 2)}
           if (lines[index] !== undefined) {
             const key = `${activeLesson.id}_${s.id}`;
             const current = newReviews[key] || { attendance: "未", aiEval: {k:"", t:"", a:""}, aiReason: "", manualEval: {k:"", t:"", a:""} };
-            newReviews[key] = { ...current, text: lines[index] }; // 空欄でもそのまま割り当てる
+            newReviews[key] = { ...current, text: lines[index] };
           }
         });
         setAppData(prev => ({ ...prev, reviews: newReviews }));
@@ -938,14 +943,14 @@ ${JSON.stringify(targetData, null, 2)}
                     <span className="text-xs font-bold text-slate-500">
                       入力済み: {activeClass.students.filter(s => getReview(s.id).text).length} 名
                     </span>
-                    <div className="flex flex-col items-end w-40 relative">
+                    {/* ★ 修正①: absolute を外し、ボタンとゲージの重なりを解消 */}
+                    <div className="flex flex-col items-end w-40">
                       <button onClick={runOverallAnalysis} disabled={isAnalyzing} className="bg-white border border-blue-300 text-blue-700 hover:bg-blue-50 px-3 py-1.5 rounded text-xs font-bold transition-colors flex items-center gap-1.5 shadow-sm w-full justify-center">
                         {isAnalyzing ? <i className="fa-solid fa-spinner fa-spin"></i> : <i className="fa-solid fa-lightbulb text-amber-500"></i>}
                         {isAnalyzing ? "分析中..." : "クラス全体を分析"}
                       </button>
-                      {/* 分析進捗ゲージ */}
                       {isAnalyzing && (
-                        <div className="absolute top-full mt-1 w-full z-10">
+                        <div className="w-full mt-1">
                           <div className="flex justify-between text-[9px] text-blue-600 font-bold mb-0.5 px-1">
                             <span>AI分析中(約20秒)...</span>
                           </div>
@@ -958,7 +963,7 @@ ${JSON.stringify(targetData, null, 2)}
                   </div>
                 </div>
                 {activeLesson.overallAnalysis ? (
-                  <div className="text-sm text-slate-700 bg-white p-4 rounded border border-slate-200 whitespace-pre-wrap leading-relaxed shadow-inner">
+                  <div className="text-sm text-slate-700 bg-white p-4 rounded border border-slate-200 whitespace-pre-wrap leading-relaxed shadow-inner font-mono">
                     {activeLesson.overallAnalysis}
                   </div>
                 ) : (
@@ -970,14 +975,14 @@ ${JSON.stringify(targetData, null, 2)}
 
               <div className="flex justify-between items-center mb-3">
                 <h3 className="font-bold text-slate-700 flex items-center gap-2"><i className="fa-solid fa-list-check"></i> 個別評価リスト</h3>
-                <div className="flex flex-col items-end w-32 relative">
+                {/* ★ 修正①: absolute を外し、ボタンとゲージの重なりを解消 */}
+                <div className="flex flex-col items-end w-32">
                   <button onClick={runAIEvaluation} disabled={isEvaluating} className="bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 text-white px-4 py-2 rounded text-sm font-bold transition-colors flex items-center gap-2 shadow-sm w-full justify-center">
                     {isEvaluating ? <i className="fa-solid fa-spinner fa-spin"></i> : <i className="fa-solid fa-wand-magic-sparkles"></i>}
                     評価開始
                   </button>
-                  {/* 評価進捗ゲージ */}
                   {isEvaluating && (
-                    <div className="absolute top-full mt-1 w-full z-10">
+                    <div className="w-full mt-1">
                       <div className="flex justify-between text-[9px] text-blue-600 font-bold mb-0.5 px-1">
                         <span>AIと通信中(数十秒)...</span>
                       </div>
@@ -994,7 +999,6 @@ ${JSON.stringify(targetData, null, 2)}
                   <thead className="bg-slate-100 text-slate-600 border-b border-slate-200">
                     <tr>
                       <th rowSpan={2} className="p-2 w-12 text-center border-r border-slate-200 align-middle text-sm font-bold">番号</th>
-                      {/* ★氏名列の幅を w-40 から w-32 にスリム化 */}
                       <th rowSpan={2} className="p-2 w-32 text-center border-r border-slate-200 align-middle text-sm font-bold">氏名</th>
                       <th rowSpan={2} className="p-2 w-12 text-center border-r border-slate-200 align-middle text-sm font-bold">性別</th>
                       <th rowSpan={2} className="p-2 w-20 text-center border-r border-slate-200 align-middle text-sm font-bold">出欠</th>
@@ -1248,10 +1252,10 @@ ${JSON.stringify(targetData, null, 2)}
               <table className="w-max text-sm border-collapse border border-slate-300 table-fixed">
                 <thead className="bg-slate-50 text-slate-600 font-bold print:bg-white print:text-black">
                   <tr>
-                    <th rowSpan={2} className="border border-slate-300 p-2 w-12 text-center align-middle shrink-0 text-sm print:text-[10px] print:w-8 print:p-1">番号</th>
-                    {/* ★氏名列の幅を w-40 から w-32 にスリム化 */}
-                    <th rowSpan={2} className="border border-slate-300 p-2 w-32 text-center align-middle shrink-0 text-sm print:text-[10px] print:p-1 print:w-auto">氏名</th>
-                    <th rowSpan={2} className="border border-slate-300 border-r-2 border-r-slate-400 p-2 w-12 text-center align-middle shrink-0 text-sm print:text-[10px] print:w-8 print:p-1">性別</th>
+                    <th rowSpan={2} className="border border-slate-300 p-2 w-12 text-center align-middle shrink-0 text-sm print:text-[11px] print:w-8 print:p-1">番号</th>
+                    {/* ★修正②: 氏名列を印刷時に潰れないように調整 (w-28, min-width指定) */}
+                    <th rowSpan={2} className="border border-slate-300 p-2 w-32 min-w-[120px] text-center align-middle shrink-0 text-sm print:text-[11px] print:p-1 print:w-28 print:min-w-[110px]">氏名</th>
+                    <th rowSpan={2} className="border border-slate-300 border-r-2 border-r-slate-400 p-2 w-12 text-center align-middle shrink-0 text-sm print:text-[11px] print:w-8 print:p-1">性別</th>
                     
                     {/* ★各授業の列を印刷時は非表示（print:hidden）にする */}
                     {classLessons.map((l, index) => (
@@ -1342,35 +1346,35 @@ ${JSON.stringify(targetData, null, 2)}
 
                     return (
                       <tr key={s.id} className="hover:bg-slate-50 border-b border-slate-200 bg-white print:bg-white print:border-gray-400">
-                        <td className="border border-slate-300 p-2 text-center text-slate-500 font-bold align-top bg-white print:text-black print:p-1 print:text-[10px]">{s.number}</td>
+                        <td className="border border-slate-300 p-2 text-center text-slate-500 font-bold align-top bg-white print:text-black print:p-1 print:text-[11px]">{s.number}</td>
                         <td className="border border-slate-300 p-2 text-left bg-white align-top print:p-1">
                           <div className="flex flex-col">
                             <div className="flex items-center gap-1.5">
-                              <span className="font-bold text-slate-700 text-sm whitespace-nowrap print:text-black print:text-[10px]">{s.name}</span>
+                              <span className="font-bold text-slate-700 text-sm whitespace-nowrap print:text-black print:text-[11px]">{s.name}</span>
                               {s.status !== "在籍" && <span className="text-[9px] bg-red-100 text-red-700 px-1 py-0.5 rounded font-bold border border-red-200 leading-none print:text-[8px] print:bg-transparent print:border-gray-500 print:text-black">{s.status}</span>}
                             </div>
                             <span className="text-[10px] text-slate-400 font-normal mt-0.5 whitespace-nowrap print:text-[8px] print:text-gray-500">{s.furigana}</span>
                           </div>
                         </td>
-                        <td className="border border-slate-300 border-r-2 border-r-slate-400 p-2 text-center text-slate-600 text-sm align-top bg-white print:text-black print:p-1 print:text-[10px]">{s.gender}</td>
+                        <td className="border border-slate-300 border-r-2 border-r-slate-400 p-2 text-center text-slate-600 text-sm align-top bg-white print:text-black print:p-1 print:text-[11px]">{s.gender}</td>
                         
                         {cells}
 
-                        <td className={`border border-slate-300 p-1 font-bold text-center align-middle text-sm ${evalColorText(finalK)} bg-white print:text-[10px] print:text-black`}>{finalK}</td>
-                        <td className={`border border-slate-300 p-1 font-bold text-center align-middle text-sm ${evalColorText(finalT)} bg-white print:text-[10px] print:text-black`}>{finalT}</td>
-                        <td className={`border border-slate-300 border-r-2 border-r-slate-400 p-1 font-bold text-center align-middle text-sm ${evalColorText(finalA)} bg-white print:text-[10px] print:text-black`}>{finalA}</td>
+                        <td className={`border border-slate-300 p-1 font-bold text-center align-middle text-sm ${evalColorText(finalK)} bg-white print:text-[11px] print:text-black`}>{finalK}</td>
+                        <td className={`border border-slate-300 p-1 font-bold text-center align-middle text-sm ${evalColorText(finalT)} bg-white print:text-[11px] print:text-black`}>{finalT}</td>
+                        <td className={`border border-slate-300 border-r-2 border-r-slate-400 p-1 font-bold text-center align-middle text-sm ${evalColorText(finalA)} bg-white print:text-[11px] print:text-black`}>{finalA}</td>
                         
-                        <td className="border border-slate-300 p-1 bg-white font-bold text-blue-800 text-center align-middle text-sm print:text-[10px] print:text-black">{kA || ''}</td>
-                        <td className="border border-slate-300 p-1 bg-white font-bold text-emerald-800 text-center align-middle text-sm print:text-[10px] print:text-black">{kB || ''}</td>
-                        <td className="border border-slate-300 border-r-2 border-r-slate-400 p-1 bg-white font-bold text-orange-800 text-center align-middle text-sm print:text-[10px] print:text-black">{kC || ''}</td>
+                        <td className="border border-slate-300 p-1 bg-white font-bold text-blue-800 text-center align-middle text-sm print:text-[11px] print:text-black">{kA || ''}</td>
+                        <td className="border border-slate-300 p-1 bg-white font-bold text-emerald-800 text-center align-middle text-sm print:text-[11px] print:text-black">{kB || ''}</td>
+                        <td className="border border-slate-300 border-r-2 border-r-slate-400 p-1 bg-white font-bold text-orange-800 text-center align-middle text-sm print:text-[11px] print:text-black">{kC || ''}</td>
                         
-                        <td className="border border-slate-300 p-1 bg-white font-bold text-blue-800 text-center align-middle text-sm print:text-[10px] print:text-black">{tA || ''}</td>
-                        <td className="border border-slate-300 p-1 bg-white font-bold text-emerald-800 text-center align-middle text-sm print:text-[10px] print:text-black">{tB || ''}</td>
-                        <td className="border border-slate-300 border-r-2 border-r-slate-400 p-1 bg-white font-bold text-orange-800 text-center align-middle text-sm print:text-[10px] print:text-black">{tC || ''}</td>
+                        <td className="border border-slate-300 p-1 bg-white font-bold text-blue-800 text-center align-middle text-sm print:text-[11px] print:text-black">{tA || ''}</td>
+                        <td className="border border-slate-300 p-1 bg-white font-bold text-emerald-800 text-center align-middle text-sm print:text-[11px] print:text-black">{tB || ''}</td>
+                        <td className="border border-slate-300 border-r-2 border-r-slate-400 p-1 bg-white font-bold text-orange-800 text-center align-middle text-sm print:text-[11px] print:text-black">{tC || ''}</td>
                         
-                        <td className="border border-slate-300 p-1 bg-white font-bold text-blue-800 text-center align-middle text-sm print:text-[10px] print:text-black">{aA || ''}</td>
-                        <td className="border border-slate-300 p-1 bg-white font-bold text-emerald-800 text-center align-middle text-sm print:text-[10px] print:text-black">{aB || ''}</td>
-                        <td className="border border-slate-300 p-1 bg-white font-bold text-orange-800 text-center align-middle text-sm print:text-[10px] print:text-black">{aC || ''}</td>
+                        <td className="border border-slate-300 p-1 bg-white font-bold text-blue-800 text-center align-middle text-sm print:text-[11px] print:text-black">{aA || ''}</td>
+                        <td className="border border-slate-300 p-1 bg-white font-bold text-emerald-800 text-center align-middle text-sm print:text-[11px] print:text-black">{aB || ''}</td>
+                        <td className="border border-slate-300 p-1 bg-white font-bold text-orange-800 text-center align-middle text-sm print:text-[11px] print:text-black">{aC || ''}</td>
                       </tr>
                     )
                   })}
