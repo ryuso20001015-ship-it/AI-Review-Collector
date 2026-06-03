@@ -114,7 +114,7 @@
     };
 
     const DEFAULT_DATA = {
-      settings: { grades: { 1: 1, 2: 0, 3: 0 }, geminiApiKey: "", attendanceSyncCode: "" },
+      settings: { grades: { 1: 1, 2: 0, 3: 0 }, geminiApiKey: "" },
       classes: [
         { 
           classId: "1-1", className: "1年1組",
@@ -135,8 +135,7 @@
       return {
         settings: {
           grades: parsed.settings?.grades || { 1: 1, 2: 0, 3: 0 },
-          geminiApiKey: parsed.settings?.geminiApiKey || "",
-          attendanceSyncCode: parsed.settings?.attendanceSyncCode || ""
+          geminiApiKey: parsed.settings?.geminiApiKey || ""
         },
         classes: Array.isArray(parsed.classes) && parsed.classes.length > 0 
           ? parsed.classes.map(c => ({
@@ -659,11 +658,13 @@ ${JSON.stringify(targetData)}
           )}
 
           <main className="container mx-auto px-2 py-4 sm:px-4">
-            {activeTab === 'evaluation' && <EvaluationScreen appData={appData} setAppData={setAppData} showToast={showToast} db={db} />}
-            {activeTab === 'cumulative' && <CumulativeScreen appData={appData} />}
-            {activeTab === 'students' && <StudentSettingsScreen appData={appData} setAppData={setAppData} showToast={showToast} />}
-            {activeTab === 'rubric' && <RubricSettingsScreen appData={appData} setAppData={setAppData} showToast={showToast} />}
-            {activeTab === 'settings' && <SystemSettingsScreen appData={appData} setAppData={setAppData} showToast={showToast} user={user} onLogout={handleLogout} />}
+            <ErrorBoundary>
+              {activeTab === 'evaluation' && <EvaluationScreen appData={appData} setAppData={setAppData} showToast={showToast} db={db} user={user} appId={appId} />}
+              {activeTab === 'cumulative' && <CumulativeScreen appData={appData} />}
+              {activeTab === 'students' && <StudentSettingsScreen appData={appData} setAppData={setAppData} showToast={showToast} />}
+              {activeTab === 'rubric' && <RubricSettingsScreen appData={appData} setAppData={setAppData} showToast={showToast} />}
+              {activeTab === 'settings' && <SystemSettingsScreen appData={appData} setAppData={setAppData} showToast={showToast} user={user} onLogout={handleLogout} />}
+            </ErrorBoundary>
           </main>
         </div>
       );
@@ -672,7 +673,7 @@ ${JSON.stringify(targetData)}
     // ==========================================
     // 1. 授業別評価画面 (EvaluationScreen)
     // ==========================================
-    function EvaluationScreen({ appData, setAppData, showToast, db }) {
+    function EvaluationScreen({ appData, setAppData, showToast, db, user, appId }) {
       const [activeClassId, setActiveClassId] = useState(appData.classes[0]?.classId || "");
       const [activeLessonId, setActiveLessonId] = useState("");
       const [pasteText, setPasteText] = useState("");
@@ -730,14 +731,12 @@ ${JSON.stringify(targetData)}
       };
 
       const syncAttendanceFromCloud = async () => {
-        const code = appData.settings.attendanceSyncCode;
-        if (!code) return showToast("設定画面で「授業出欠記録システム」の同期コードを入力してください。", "error");
-        if (!activeLesson || !db) return;
+        if (!activeLesson || !db || !user) return;
 
         showToast("出欠データを取得中...", "info");
         try {
-          // Modular版メソッドによるデータ取得
-          const docRef = window.fb.doc(db, 'attendance_sync', code);
+          // アカウント連携: 同じFirebaseプロジェクト・同じUIDの出欠記録データを直接取得する
+          const docRef = window.fb.doc(db, 'artifacts', appId, 'users', user.uid, 'attendance_data', 'main');
           const docSnap = await window.fb.getDoc(docRef);
           
           if (docSnap.exists()) {
@@ -775,7 +774,7 @@ ${JSON.stringify(targetData)}
             setAppData(prev => ({ ...prev, reviews: newReviews }));
             showToast(`${syncCount}名の出欠状況を反映しました。`, "success");
           } else {
-            showToast("同期コードが無効、またはデータが存在しません。", "error");
+            showToast("出欠データが見つかりません。同じアカウントで出欠記録システムを利用しているか確認してください。", "error");
           }
         } catch (e) {
           console.error(e);
@@ -1477,10 +1476,9 @@ ${JSON.stringify(targetData)}
     function SystemSettingsScreen({ appData, setAppData, showToast, user, onLogout }) {
       const safeSettings = appData.settings || {};
       const [apiInput, setApiInput] = useState(safeSettings.geminiApiKey || "");
-      const [attSyncInput, setAttSyncInput] = useState(safeSettings.attendanceSyncCode || "");
 
       const saveApiSettings = () => {
-        setAppData({ ...appData, settings: { ...(appData.settings || {}), geminiApiKey: apiInput.trim(), attendanceSyncCode: attSyncInput.trim() } });
+        setAppData({ ...appData, settings: { ...(appData.settings || {}), geminiApiKey: apiInput.trim() } });
         showToast("設定を保存しました。", "success");
       };
 
@@ -1528,23 +1526,18 @@ ${JSON.stringify(targetData)}
       return (
         <div className="max-w-4xl mx-auto space-y-6 pb-10">
           <div className="bg-white p-6 rounded-lg shadow-sm border border-slate-200">
-            <h2 className="font-bold text-slate-700 mb-4 border-b pb-2 flex items-center gap-2"><i className="fa-solid fa-key text-amber-500"></i> API・連携設定</h2>
+            <h2 className="font-bold text-slate-700 mb-4 border-b pb-2 flex items-center gap-2"><i className="fa-solid fa-key text-amber-500"></i> API設定</h2>
             <div className="mb-4">
               <label className="block text-sm font-bold text-slate-600 mb-1">Gemini API キー</label>
               <input type="password" value={apiInput} onChange={e => setApiInput(e.target.value)} className="w-full border border-slate-300 rounded p-2 text-sm focus:ring-2 focus:ring-amber-500 font-mono" placeholder="AIzaSy..." />
               <p className="text-xs text-slate-400 mt-1">※AI評価を実行するために必要です。端末内にのみ保存されます。</p>
-            </div>
-            <div className="mb-4">
-              <label className="block text-sm font-bold text-slate-600 mb-1">授業出欠記録システムの同期コード</label>
-              <input type="text" value={attSyncInput} onChange={e => setAttSyncInput(e.target.value)} className="w-full border border-slate-300 rounded p-2 text-sm focus:ring-2 focus:ring-amber-500 font-mono tracking-widest" placeholder="8桁の数字" />
-              <p className="text-xs text-slate-400 mt-1">※設定すると、授業別評価画面で出欠データを一括取得できます。</p>
             </div>
             <button onClick={saveApiSettings} className="bg-amber-500 hover:bg-amber-600 text-white px-6 py-2 rounded font-bold shadow-sm flex items-center gap-2 transition-colors"><i className="fa-solid fa-save"></i> 設定を保存</button>
           </div>
 
           <div className="bg-white p-6 rounded-lg shadow-sm border border-slate-200">
             <h2 className="font-bold text-slate-700 mb-4 border-b pb-2 flex items-center gap-2"><i className="fa-solid fa-user-circle text-blue-500"></i> アカウントとデータ同期</h2>
-            <p className="text-sm text-slate-600 mb-4">ログイン中のアカウントにデータが自動的に保存され、他の端末と同期されます。</p>
+            <p className="text-sm text-slate-600 mb-4">ログイン中のアカウントにデータが自動的に保存され、他の端末と同期されます。<br/>また、同じアカウントで「授業出欠記録システム」を利用している場合、出欠データが自動で連携されます。</p>
             <div className="flex flex-col sm:flex-row items-center justify-between gap-3 bg-blue-50 p-4 rounded-lg border border-blue-100 shadow-inner">
               <div className="flex flex-col w-full sm:w-auto min-w-0">
                 <span className="text-[10px] font-bold text-blue-800 mb-0.5">ログイン中のアカウント:</span>
